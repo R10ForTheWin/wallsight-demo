@@ -105,6 +105,31 @@
   }
   #peephole-btn.show { display: flex; }
   #peephole-btn.active { background: rgba(47,111,237,0.35); border-color: rgba(96,150,255,0.55); }
+  #labels-btn {
+    width: 30px; height: 30px; border-radius: 50%; font-size: 14px; line-height: 1;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+    backdrop-filter: blur(6px); color: #fff; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+  }
+  #labels-btn.show { display: flex; }
+  #labels-btn.active { background: rgba(47,111,237,0.35); border-color: rgba(96,150,255,0.55); }
+
+  /* ---------- Label legend: shown only while the annotation layer is on ---------- */
+  #label-legend {
+    position: fixed; top: max(60px, calc(48px + env(safe-area-inset-top))); left: 50%;
+    transform: translateX(-50%); z-index: 20;
+    display: none; align-items: center; gap: 14px;
+    background: rgba(10,16,28,0.72); border: 1px solid rgba(255,255,255,0.16);
+    backdrop-filter: blur(10px);
+    border-radius: 999px; padding: 8px 16px;
+    pointer-events: none;
+  }
+  #label-legend.show { display: flex; }
+  #label-legend .legend-item {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11.5px; font-weight: 600; color: #e5e9f0; white-space: nowrap;
+  }
+  #label-legend .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
 
   /* ---------- Center reticle: aiming aid ---------- */
   #center-reticle {
@@ -279,8 +304,16 @@
   <div id="top-bar-controls">
     <div id="calib-pill"></div>
     <button id="peephole-btn" title="Toggle peephole mode">⭕</button>
+    <button id="labels-btn" title="Toggle stud/electrical/plumbing labels"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></button>
     <button id="recalibrate-btn" title="Recalibrate direction"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></button>
   </div>
+</div>
+
+<!-- Legend for the stud/electrical/plumbing label layer, shown only while it's on -->
+<div id="label-legend">
+  <span class="legend-item"><span class="dot" style="background:#ffb300"></span>Studs</span>
+  <span class="legend-item"><span class="dot" style="background:#ff1744"></span>Electrical</span>
+  <span class="legend-item"><span class="dot" style="background:#00e5ff"></span>Plumbing</span>
 </div>
 
 <!-- Faint center reticle: aiming aid for the peephole and for manual trim -->
@@ -368,6 +401,7 @@ import * as THREE from "three";
 const state = {
   revealed: true,
   revealFactor: 1,       // smoothed 0..1, drives the crossfade toggle transition
+  showLabels: false,     // stud/electrical/plumbing label layer toggle
   orientationActive: false,
   dragActive: false,
   lastPointer: null,
@@ -411,10 +445,10 @@ scene.add(wallGroup);
    If a file is missing, a labeled placeholder texture is generated
    instead so the rig still runs end-to-end while photos are pending. */
 const PHOTO_DEFS = [
-  { key: "front",   file: "front.jpg",   caption: "Front Wall — Screen & AV Rough-In", dot: "#3b82f6", dir: [0, 0, -1] },
-  { key: "back",    file: "back.jpg",    caption: "Back Wall — Entry Doors",           dot: "#a855f7", dir: [0, 0, 1] },
-  { key: "right",   file: "right.jpg",   caption: "Side Wall — Emergency Exit",        dot: "#22c55e", dir: [1, 0, 0] },
-  { key: "ceiling", file: "ceiling.jpg", caption: "Ceiling — HVAC & Conduit",          dot: "#38bdf8", dir: [0, 1, 0] },
+  { key: "front",   file: "front.jpg",   annot: "front-annot.png",   caption: "Front Wall — Screen & AV Rough-In", dot: "#3b82f6", dir: [0, 0, -1] },
+  { key: "back",    file: "back.jpg",    annot: "back-annot.png",    caption: "Back Wall — Entry Doors",           dot: "#a855f7", dir: [0, 0, 1] },
+  { key: "right",   file: "right.jpg",   annot: "right-annot.png",   caption: "Side Wall — Emergency Exit",        dot: "#22c55e", dir: [1, 0, 0] },
+  { key: "ceiling", file: "ceiling.jpg", annot: "ceiling-annot.png", caption: "Ceiling — HVAC & Conduit",          dot: "#38bdf8", dir: [0, 1, 0] },
   // No distinct "left" photo yet — the low-opacity wide backdrop sphere
   // fills that gap as you pan left. Add a left.jpg + entry here later.
 ];
@@ -540,9 +574,33 @@ async function buildPhotoRig() {
     const dir = new THREE.Vector3(...def.dir).normalize();
     mesh.position.copy(dir).multiplyScalar(PLANE_DISTANCE);
     mesh.lookAt(0, 0, 0);
+    mesh.renderOrder = 0;
     wallGroup.add(mesh);
 
-    photoMeshes.push({ mesh, dir, def });
+    // Optional stud/electrical/plumbing label layer — same plane, drawn a
+    // hair closer to camera (renderOrder) so it sits cleanly on top of the
+    // photo instead of z-fighting with it. Missing/failed-to-load annot
+    // files just mean no label layer for that direction, not an error.
+    let annotMesh = null;
+    if (def.annot) {
+      const annotTex = await tryLoadTexture(def.annot);
+      if (annotTex) {
+        const annotMat = new THREE.MeshBasicMaterial({
+          map: annotTex,
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        });
+        annotMesh = new THREE.Mesh(geo, annotMat);
+        annotMesh.position.copy(mesh.position);
+        annotMesh.quaternion.copy(mesh.quaternion);
+        annotMesh.renderOrder = 1;
+        wallGroup.add(annotMesh);
+      }
+    }
+
+    photoMeshes.push({ mesh, annotMesh, dir, def });
   }
 
   // Wide establishing shot as a low-opacity backdrop sphere, filling gaps
@@ -729,6 +787,15 @@ peepholeBtn.addEventListener("click", () => {
   applyPeepholeMode();
 });
 
+/* ---------------- Stud/electrical/plumbing label layer ---------------- */
+const labelsBtn = document.getElementById("labels-btn");
+const labelLegend = document.getElementById("label-legend");
+labelsBtn.addEventListener("click", () => {
+  state.showLabels = !state.showLabels;
+  labelsBtn.classList.toggle("active", state.showLabels);
+  labelLegend.classList.toggle("show", state.showLabels);
+});
+
 function hideLookHint() {
   document.getElementById("look-hint").classList.remove("show");
 }
@@ -795,6 +862,7 @@ startBtn.addEventListener("click", async () => {
     startScreen.style.display = "none";
     document.getElementById("recalibrate-btn").classList.add("show");
     document.getElementById("peephole-btn").classList.add("show");
+    document.getElementById("labels-btn").classList.add("show");
 
     if (motionStatus === "granted") {
       // Let the calibration screen sit over the live camera feed so the
@@ -908,10 +976,13 @@ function animate() {
     camera.getWorldDirection(forward);
 
     let bestKey = null, bestWeight = -1, bestDef = null;
-    for (const { mesh, dir, def } of photoMeshes) {
+    for (const { mesh, annotMesh, dir, def } of photoMeshes) {
       const dot = Math.max(0, forward.dot(dir));
       const weight = Math.pow(dot, peepholeMode ? 1 : WEIGHT_POWER);
       mesh.material.opacity = weight * activeBlend * state.revealFactor;
+      if (annotMesh) {
+        annotMesh.material.opacity = state.showLabels ? weight * activeBlend * state.revealFactor : 0;
+      }
       if (weight > bestWeight) { bestWeight = weight; bestKey = def.key; bestDef = def; }
     }
     if (wideSphereRef) {
