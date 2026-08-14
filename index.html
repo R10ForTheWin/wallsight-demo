@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>WallSight — See Inside Your Walls</title>
+<style>
+  :root {
+    --ws-navy: #0b1f3a;
+    --ws-blue: #2f6fed;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #000;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    color: #fff;
+    overscroll-behavior: none;
+  }
+  #camera-feed {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; background: #000; z-index: 0;
+  }
+  #three-canvas {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    z-index: 1; touch-action: none;
+  }
+  /* Peephole mode: only a soft circle at screen-center shows the x-ray
+     layer, feathering out to plain camera feed — rest of the canvas is
+     masked to transparent. vmin-based radii keep it a true circle
+     regardless of viewport aspect (percentage stops would go elliptical). */
+  #three-canvas.peephole {
+    -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 0, #000 40vmin, transparent 46vmin);
+    mask-image: radial-gradient(circle at 50% 50%, #000 0, #000 40vmin, transparent 46vmin);
+  }
+
+  /* ---------- Start / Permission overlay ---------- */
+  #start-screen {
+    position: fixed; inset: 0; z-index: 50;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: radial-gradient(120% 120% at 50% 0%, #16305c 0%, #081326 60%, #04070d 100%);
+    text-align: center; padding: 32px;
+  }
+  #start-screen .logo {
+    display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
+  }
+  #start-screen .logo svg { width: 34px; height: 34px; }
+  #start-screen .logo span {
+    font-size: 22px; font-weight: 700; letter-spacing: 0.06em; color: #fff;
+  }
+  #start-screen h1 {
+    font-size: 26px; margin: 0 0 10px; font-weight: 700; max-width: 340px; line-height: 1.25;
+  }
+  #start-screen p {
+    font-size: 15px; color: #b9c6de; max-width: 320px; line-height: 1.5; margin: 0 0 28px;
+  }
+  #start-btn {
+    background: linear-gradient(135deg, #3b82f6, #2f6fed);
+    color: #fff; border: none; border-radius: 999px;
+    padding: 16px 40px; font-size: 17px; font-weight: 600;
+    box-shadow: 0 8px 24px rgba(47,111,237,0.45);
+    cursor: pointer;
+  }
+  #start-btn:active { transform: scale(0.97); }
+  #start-note {
+    margin-top: 16px; font-size: 12.5px; color: #7c8aa5; max-width: 300px;
+  }
+  #start-error {
+    margin-top: 16px; font-size: 13px; color: #fca5a5; max-width: 300px; display: none;
+  }
+
+  /* ---------- Top bar ---------- */
+  #top-bar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+    padding: max(14px, env(safe-area-inset-top)) 16px 10px;
+    display: flex; align-items: center; justify-content: space-between;
+    background: linear-gradient(to bottom, rgba(4,8,16,0.75), rgba(4,8,16,0));
+    pointer-events: none;
+  }
+  #top-bar .brand { display: flex; align-items: center; gap: 8px; pointer-events: auto; }
+  #top-bar .brand svg { width: 22px; height: 22px; }
+  #top-bar .brand span { font-weight: 700; font-size: 15px; letter-spacing: 0.05em; }
+  #calib-pill {
+    font-size: 11px; color: #cbd5e1; background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.14); border-radius: 999px;
+    padding: 5px 10px; pointer-events: auto; backdrop-filter: blur(6px);
+  }
+  /* Empty when everything's working normally — only takes up space (and
+     shows the "motion blocked" warning) when there's actually something
+     to say. */
+  #calib-pill:empty { display: none; }
+  #top-bar-controls { display: flex; align-items: center; gap: 8px; pointer-events: auto; }
+  #recalibrate-btn {
+    width: 30px; height: 30px; border-radius: 50%; font-size: 15px; line-height: 1;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+    backdrop-filter: blur(6px); color: #fff; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+  }
+  #recalibrate-btn.show { display: flex; }
+  #peephole-btn {
+    width: 30px; height: 30px; border-radius: 50%; font-size: 14px; line-height: 1;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+    backdrop-filter: blur(6px); color: #fff; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+  }
+  #peephole-btn.show { display: flex; }
+  #peephole-btn.active { background: rgba(47,111,237,0.35); border-color: rgba(96,150,255,0.55); }
+
+  /* ---------- Center reticle: aiming aid ---------- */
+  #center-reticle {
+    position: fixed; z-index: 16; left: 50%; top: 50%;
+    width: 18px; height: 18px; margin: -9px 0 0 -9px;
+    pointer-events: none; opacity: 0;
+  }
+  #center-reticle::before, #center-reticle::after {
+    content: ""; position: absolute; background: #fff; border-radius: 1px;
+  }
+  #center-reticle::before { left: 8px; top: 0; width: 2px; height: 18px; }
+  #center-reticle::after { left: 0; top: 8px; width: 18px; height: 2px; }
+
+  /* ---------- Nudge pad: fine yaw/pitch trim ---------- */
+  #nudge-pad {
+    position: fixed; left: 14px; bottom: max(108px, calc(96px + env(safe-area-inset-bottom)));
+    z-index: 20; display: none;
+    grid-template-columns: 30px 30px 30px;
+    grid-template-rows: 30px 30px 30px;
+    gap: 3px;
+  }
+  #nudge-pad.show { display: grid; }
+  .nudge-btn {
+    background: rgba(10,16,28,0.68); border: 1px solid rgba(255,255,255,0.16);
+    backdrop-filter: blur(8px); color: #cbd5e1; font-size: 11px;
+    border-radius: 7px; display: flex; align-items: center; justify-content: center;
+    cursor: pointer; padding: 0; user-select: none;
+  }
+  .nudge-btn:active { background: rgba(47,111,237,0.4); color: #fff; }
+  .nudge-up { grid-column: 2; grid-row: 1; }
+  .nudge-left { grid-column: 1; grid-row: 2; }
+  .nudge-reset { grid-column: 2; grid-row: 2; font-size: 16px; color: #64748b; }
+  .nudge-right { grid-column: 3; grid-row: 2; }
+  .nudge-down { grid-column: 2; grid-row: 3; }
+
+  /* ---------- Calibration overlay ---------- */
+  #calibrate-overlay {
+    position: fixed; inset: 0; z-index: 40;
+    display: none; align-items: flex-end; justify-content: center;
+    background: rgba(4,8,16,0.35);
+    padding: 0 16px max(24px, env(safe-area-inset-bottom));
+  }
+  #calibrate-overlay.show { display: flex; }
+  #calibrate-card {
+    width: 100%; max-width: 380px;
+    background: rgba(10,16,28,0.88); border: 1px solid rgba(255,255,255,0.16);
+    backdrop-filter: blur(14px);
+    border-radius: 18px; padding: 22px 22px 18px; text-align: center;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+  }
+  #calibrate-card .icon { font-size: 30px; margin-bottom: 8px; }
+  #calibrate-card h2 { font-size: 17px; margin: 0 0 8px; font-weight: 700; }
+  #calibrate-card p { font-size: 13.5px; color: #b9c6de; line-height: 1.5; margin: 0 0 18px; }
+  #calibrate-btn {
+    width: 100%; background: linear-gradient(135deg, #3b82f6, #2f6fed);
+    color: #fff; border: none; border-radius: 12px;
+    padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  #calibrate-skip-btn {
+    width: 100%; background: transparent; border: none; color: #8b9ab5;
+    font-size: 13px; padding: 12px; cursor: pointer;
+  }
+
+  /* ---------- Missing-assets dev banner ---------- */
+  #asset-banner {
+    position: fixed; top: 56px; left: 12px; right: 12px; z-index: 21;
+    background: rgba(120, 53, 15, 0.88); border: 1px solid rgba(251,191,36,0.4);
+    backdrop-filter: blur(8px);
+    border-radius: 10px; padding: 9px 12px; font-size: 11.5px; line-height: 1.45;
+    color: #fef3c7; display: none;
+  }
+  #asset-banner.show { display: block; }
+  #asset-banner b { color: #fde68a; }
+  #asset-banner .close {
+    float: right; margin-left: 8px; cursor: pointer; opacity: 0.75; font-weight: 700;
+  }
+
+  /* ---------- Motion-blocked banner ---------- */
+  #motion-banner {
+    position: fixed; top: 56px; left: 12px; right: 12px; z-index: 21;
+    background: rgba(127, 29, 29, 0.9); border: 1px solid rgba(248,113,113,0.5);
+    backdrop-filter: blur(8px);
+    border-radius: 10px; padding: 10px 12px; font-size: 12px; line-height: 1.5;
+    color: #fee2e2; display: none;
+  }
+  #motion-banner.show { display: block; }
+  #motion-banner b { color: #fecaca; }
+  #motion-banner .close {
+    float: right; margin-left: 8px; cursor: pointer; opacity: 0.75; font-weight: 700;
+  }
+  #motion-retry-btn {
+    display: block; margin-top: 8px; background: rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.25); color: #fff; font-size: 12px;
+    font-weight: 600; padding: 7px 12px; border-radius: 7px; cursor: pointer;
+  }
+
+  /* ---------- Reveal toggle ---------- */
+  #reveal-wrap {
+    position: fixed; left: 0; right: 0; bottom: max(108px, calc(96px + env(safe-area-inset-bottom)));
+    z-index: 20; display: flex; justify-content: center; pointer-events: none;
+  }
+  #reveal-btn {
+    pointer-events: auto;
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(10,16,28,0.72); border: 1px solid rgba(255,255,255,0.16);
+    backdrop-filter: blur(10px);
+    border-radius: 999px; padding: 12px 22px;
+    color: #fff; font-size: 15px; font-weight: 600;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.35);
+  }
+  #reveal-btn .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #22c55e; box-shadow: 0 0 10px #22c55e;
+    transition: background 0.2s, box-shadow 0.2s;
+  }
+  #reveal-btn.hidden-state .dot {
+    background: #64748b; box-shadow: none;
+  }
+
+  /* ---------- Caption (replaces category legend chips) ---------- */
+  #caption-wrap {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    padding: 10px 16px max(16px, env(safe-area-inset-bottom));
+    display: flex; justify-content: center;
+    background: linear-gradient(to top, rgba(4,8,16,0.85), rgba(4,8,16,0));
+    pointer-events: none;
+  }
+  #caption-chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+    backdrop-filter: blur(8px);
+    border-radius: 999px; padding: 9px 16px; font-size: 12.5px; font-weight: 600;
+    color: #e5e9f0; white-space: nowrap;
+    opacity: 0; transform: translateY(4px);
+    transition: opacity 0.35s ease, transform 0.35s ease;
+  }
+  #caption-chip.show { opacity: 1; transform: translateY(0); }
+  #caption-chip .caption-dot {
+    width: 7px; height: 7px; border-radius: 50%; background: var(--dot, #3b82f6);
+    flex: 0 0 auto;
+  }
+
+  /* ---------- Look hint ---------- */
+  #look-hint {
+    position: fixed; z-index: 15; left: 50%; top: 50%;
+    transform: translate(-50%,-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    color: rgba(255,255,255,0.85); pointer-events: none;
+    opacity: 0; transition: opacity 0.4s;
+  }
+  #look-hint.show { opacity: 1; }
+  #look-hint svg { width: 40px; height: 40px; animation: sway 1.6s ease-in-out infinite; }
+  #look-hint span { font-size: 13px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+  @keyframes sway {
+    0%, 100% { transform: rotate(-14deg); }
+    50% { transform: rotate(14deg); }
+  }
+</style>
+</head>
+<body>
+
+<!-- Camera feed sits behind the WebGL canvas -->
+<video id="camera-feed" autoplay playsinline muted></video>
+<canvas id="three-canvas"></canvas>
+
+<!-- Top bar -->
+<div id="top-bar">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" fill="none"><path d="M4 8 L16 20 L28 8" stroke="#3b82f6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>WALLSIGHT</span>
+  </div>
+  <div id="top-bar-controls">
+    <div id="calib-pill"></div>
+    <button id="peephole-btn" title="Toggle peephole mode">⭕</button>
+    <button id="recalibrate-btn" title="Recalibrate direction">🧭</button>
+  </div>
+</div>
+
+<!-- Faint center reticle: aiming aid for the peephole and for manual trim -->
+<div id="center-reticle"></div>
+
+<!-- Nudge pad: fine yaw/pitch trim on top of sensor calibration -->
+<div id="nudge-pad">
+  <button id="nudge-up" class="nudge-btn nudge-up" title="Nudge up">▲</button>
+  <button id="nudge-left" class="nudge-btn nudge-left" title="Nudge left">◀</button>
+  <button id="nudge-reset" class="nudge-btn nudge-reset" title="Reset trim">•</button>
+  <button id="nudge-right" class="nudge-btn nudge-right" title="Nudge right">▶</button>
+  <button id="nudge-down" class="nudge-btn nudge-down" title="Nudge down">▼</button>
+</div>
+
+<!-- Calibration overlay: aligns the panorama's "front" to a real wall in the room -->
+<div id="calibrate-overlay">
+  <div id="calibrate-card">
+    <div class="icon">🧭</div>
+    <h2>Calibrate Direction</h2>
+    <p>Stand where you'll hold the phone during the demo, face the wall you captured as the <b>start</b> of your panorama, then tap Calibrate.</p>
+    <button id="calibrate-btn">Calibrate Now</button>
+    <button id="calibrate-skip-btn">Skip — use current facing</button>
+  </div>
+</div>
+
+<!-- Dev-only banner shown when photo assets are missing (placeholders in use) -->
+<div id="asset-banner"><span class="close" id="asset-banner-close">✕</span><span id="asset-banner-text"></span></div>
+
+<!-- Shown when motion permission was blocked, with a way to retry -->
+<div id="motion-banner">
+  <span class="close" id="motion-banner-close">✕</span>
+  <b>Motion access is blocked</b> — you can still drag with your finger to look around. To enable gyro panning: <b>Settings → Safari → Motion &amp; Orientation Access</b> (turn ON), then reload this page.
+  <button id="motion-retry-btn">Try Again</button>
+</div>
+
+<!-- Look hint -->
+<div id="look-hint">
+  <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.6"><rect x="7" y="2" width="10" height="20" rx="2.5"/><line x1="12" y1="18" x2="12" y2="18.01"/></svg>
+  <span>Pan &amp; tilt your phone to look around</span>
+</div>
+
+<!-- Reveal toggle -->
+<div id="reveal-wrap">
+  <button id="reveal-btn"><span class="dot"></span><span id="reveal-label">Hide X-Ray</span></button>
+</div>
+
+<!-- Dynamic caption (replaces the old category legend chips) -->
+<div id="caption-wrap">
+  <div id="caption-chip"><span class="caption-dot"></span><span id="caption-text">Exploring the wall cavity…</span></div>
+</div>
+
+<!-- Start / permission screen -->
+<div id="start-screen">
+  <div class="logo">
+    <svg viewBox="0 0 32 32" fill="none"><path d="M4 8 L16 20 L28 8" stroke="#3b82f6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    <span>WALLSIGHT</span>
+  </div>
+  <h1>See What's Behind This Wall</h1>
+  <p>Point your camera at any wall and move your phone to reveal the framing, conduit, and ductwork hidden behind it — no app required.</p>
+  <button id="start-btn">Start Camera</button>
+  <div id="start-note">This demo needs camera and motion access. Nothing is recorded or uploaded — everything stays on your phone.</div>
+  <div id="start-error"></div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from "three";
+
+/* ============================================================
+   WallSight AR Demo — photo-based reveal layer
+   - Live camera feed as page background
+   - 5 direction-mapped construction photos (front/back/left/
+     right/ceiling) plus a low-opacity "wide" backdrop sphere
+     for continuity between them, arranged around a fixed
+     virtual camera at the origin.
+   - Device orientation (with drag fallback) rotates the virtual
+     camera; each photo's opacity is weighted by how directly
+     the camera is facing it, producing a smooth crossfade as
+     you pan rather than hard image-swap seams.
+   - Purely synthetic placement — not tied to real room geometry.
+   ============================================================ */
+
+const state = {
+  revealed: true,
+  revealFactor: 1,       // smoothed 0..1, drives the crossfade toggle transition
+  orientationActive: false,
+  dragActive: false,
+  lastPointer: null,
+  yaw: 0,
+  pitch: 0,
+  targetYaw: 0,
+  targetPitch: 0,
+  yawFromSensor: 0,      // raw calibrated yaw from the compass, before manual trim
+  pitchFromSensor: 0,    // raw calibrated pitch from gravity, before manual trim
+  yawTrim: 0,            // manual fine-alignment offset (drag or nudge pad), on top of the sensor
+  pitchTrim: 0,          // same, for pitch — persists across recalibration is reset on purpose
+  currentHeading: null,  // latest raw compass heading, degrees, 0-360
+  baseHeading: null,     // heading that maps to yaw 0 (the pano's "front"); set on calibration
+  currentBeta: null,     // latest raw device-tilt reading, degrees
+  basePitch: null,       // tilt that maps to pitch 0; set on calibration (handles phone not being held perfectly upright)
+  hintTimer: null,
+  activeCaptionKey: null,
+};
+
+// How opaque a directly-faced photo gets at full reveal. Soft-blend per
+// user preference: camera feed still ghosts through rather than a hard cut.
+const BLEND_OPACITY = 0.86;
+const WIDE_BLEND_OPACITY = 0.4; // backdrop layer stays subtler than direction photos
+
+/* ---------------- Renderer / Scene / Camera ---------------- */
+const canvas = document.getElementById("three-canvas");
+const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(0, 0, 0);
+
+const wallGroup = new THREE.Group();
+scene.add(wallGroup);
+
+/* ---------------- Photo asset loading (with placeholder fallback) ---------------- */
+/* Real photos go in the same folder as this file:
+     front.jpg, back.jpg, left.jpg, right.jpg, ceiling.jpg, wide.jpg
+   If a file is missing, a labeled placeholder texture is generated
+   instead so the rig still runs end-to-end while photos are pending. */
+const PHOTO_DEFS = [
+  { key: "front",   file: "front.jpg",   caption: "Front Wall — Screen & AV Rough-In", dot: "#3b82f6", dir: [0, 0, -1] },
+  { key: "back",    file: "back.jpg",    caption: "Back Wall — Entry Doors",           dot: "#a855f7", dir: [0, 0, 1] },
+  { key: "right",   file: "right.jpg",   caption: "Side Wall — Emergency Exit",        dot: "#22c55e", dir: [1, 0, 0] },
+  { key: "ceiling", file: "ceiling.jpg", caption: "Ceiling — HVAC & Conduit",          dot: "#38bdf8", dir: [0, 1, 0] },
+  // No distinct "left" photo yet — the low-opacity wide backdrop sphere
+  // fills that gap as you pan left. Add a left.jpg + entry here later.
+];
+const WIDE_DEF = { key: "wide", file: "wide.jpg" };
+
+// A real 360° equirectangular capture (see capture guide) goes here. When
+// present, it replaces the whole direction-photo rig below with a single
+// continuous sphere — no seams, no rough direction-guessing. Its absence
+// is NOT treated as a missing asset; it just means "not captured yet,"
+// so the legacy multi-photo demo rig keeps running underneath it.
+const PANO_FILE = "pano.jpg";
+
+const loader = new THREE.TextureLoader();
+const missingAssets = [];
+
+function tryLoadTexture(file) {
+  return new Promise((resolve) => {
+    loader.load(file, (tex) => { tex.colorSpace = THREE.SRGBColorSpace; resolve(tex); }, undefined, () => resolve(null));
+  });
+}
+
+function loadTextureWithFallback(file, label) {
+  return new Promise((resolve) => {
+    loader.load(
+      file,
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        resolve(tex);
+      },
+      undefined,
+      () => {
+        missingAssets.push(file);
+        resolve(makePlaceholderTexture(label));
+      }
+    );
+  });
+}
+
+function makePlaceholderTexture(label) {
+  const W = 1024, H = 768;
+  const cvs = document.createElement("canvas");
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext("2d");
+  const grad = ctx.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, "#1c2536");
+  grad.addColorStop(1, "#0a1020");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = "rgba(255,255,255,0.14)";
+  ctx.lineWidth = 3;
+  for (let x = 0; x < W; x += 64) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 64) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  ctx.font = "700 34px -apple-system, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(`${label}`, W / 2, H / 2 - 10);
+  ctx.font = "500 18px -apple-system, sans-serif";
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.fillText("placeholder — drop in real photo", W / 2, H / 2 + 24);
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/* Bakes a soft radial alpha feather into a copy of the loaded texture so
+   each photo's edges dissolve into the surrounding camera feed / backdrop
+   instead of showing a hard rectangular seam. */
+function featherTexture(sourceTex) {
+  const W = 1024, H = 768;
+  const cvs = document.createElement("canvas");
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext("2d");
+
+  const img = sourceTex.image;
+  if (img && img.width) {
+    // cover-fit the source image into the canvas
+    const srcAR = img.width / img.height, dstAR = W / H;
+    let sx, sy, sw, sh;
+    if (srcAR > dstAR) {
+      sh = img.height; sw = sh * dstAR; sx = (img.width - sw) / 2; sy = 0;
+    } else {
+      sw = img.width; sh = sw / dstAR; sx = 0; sy = (img.height - sh) / 2;
+    }
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
+  }
+
+  // feather mask via destination-in radial gradient
+  ctx.globalCompositeOperation = "destination-in";
+  const cx = W / 2, cy = H / 2;
+  const grad = ctx.createRadialGradient(cx, cy, W * 0.18, cx, cy, W * 0.62);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.72, "rgba(255,255,255,1)");
+  grad.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/* ---------------- Build the direction-mapped photo rig ---------------- */
+const PLANE_DISTANCE = 5;
+const PLANE_SIZE = 9; // world units; generously overfills the FOV at PLANE_DISTANCE
+
+const photoMeshes = []; // { mesh, dir: Vector3, def }
+
+async function buildPhotoRig() {
+  for (const def of PHOTO_DEFS) {
+    const rawTex = await loadTextureWithFallback(def.file, def.caption);
+    const tex = featherTexture(rawTex);
+
+    const geo = new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+
+    const dir = new THREE.Vector3(...def.dir).normalize();
+    mesh.position.copy(dir).multiplyScalar(PLANE_DISTANCE);
+    mesh.lookAt(0, 0, 0);
+    wallGroup.add(mesh);
+
+    photoMeshes.push({ mesh, dir, def });
+  }
+
+  // Wide establishing shot as a low-opacity backdrop sphere, filling gaps
+  // between the five directional photos as the camera pans past them.
+  const wideRawTex = await loadTextureWithFallback(WIDE_DEF.file, "Wide Establishing View");
+  wideRawTex.wrapS = THREE.RepeatWrapping;
+  wideRawTex.wrapT = THREE.ClampToEdgeWrapping;
+  wideRawTex.repeat.set(2, 1);
+  const wideGeo = new THREE.SphereGeometry(6.4, 48, 32);
+  const wideMat = new THREE.MeshBasicMaterial({
+    map: wideRawTex,
+    side: THREE.BackSide,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+  });
+  const wideSphere = new THREE.Mesh(wideGeo, wideMat);
+  wallGroup.add(wideSphere);
+
+  showMissingAssetBanner();
+
+  return { wideSphere };
+}
+
+function showMissingAssetBanner() {
+  if (!missingAssets.length) return;
+  const banner = document.getElementById("asset-banner");
+  const text = document.getElementById("asset-banner-text");
+  text.innerHTML = `<b>Placeholder images in use</b> for: ${missingAssets.join(", ")}. Drop matching JPGs into the project folder and reload to swap them in.`;
+  banner.classList.add("show");
+  document.getElementById("asset-banner-close").addEventListener("click", () => {
+    banner.classList.remove("show");
+  });
+}
+
+/* ---------------- Build the real equirectangular pano sphere, if captured ---------------- */
+function buildPanoSphere(tex) {
+  // Standard equirect-skybox technique: flip the sphere inside-out via
+  // negative X scale so the UVs read correctly from a viewpoint inside it
+  // (a plain BackSide sphere would mirror the image left-right, which
+  // matters a lot for a real room capture — text/exits would read backwards).
+  const geo = new THREE.SphereGeometry(6, 64, 40);
+  geo.scale(-1, 1, 1);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  wallGroup.add(mesh);
+  return mesh;
+}
+
+let wideSphereRef = null;
+let panoSphereRef = null;
+let usingPano = false;
+
+async function buildRig() {
+  const panoTex = await tryLoadTexture(PANO_FILE);
+  if (panoTex) {
+    usingPano = true;
+    panoSphereRef = buildPanoSphere(panoTex);
+    document.getElementById("caption-wrap").style.display = "none";
+    return;
+  }
+  const rig = await buildPhotoRig();
+  wideSphereRef = rig.wideSphere;
+}
+const rigReady = buildRig();
+
+/* ---------------- Interaction: device orientation + drag fallback ---------------- */
+const DEG2RAD = Math.PI / 180;
+
+// True compass heading (0-360, 0 = north), independent of which way the
+// phone happened to be pointing when the page loaded. iOS exposes this
+// directly as webkitCompassHeading; elsewhere we approximate from alpha.
+function getHeading(e) {
+  if (typeof e.webkitCompassHeading === "number" && !isNaN(e.webkitCompassHeading)) {
+    return e.webkitCompassHeading;
+  }
+  if (e.alpha !== null) return (360 - e.alpha) % 360;
+  return null;
+}
+
+function normalizeAngle180(deg) {
+  return ((deg + 180) % 360 + 360) % 360 - 180;
+}
+
+// Locks whatever heading + tilt the phone is facing right now as yaw/pitch-0
+// (the pano's "front"). Called by the Calibrate/Skip buttons and the
+// recalibrate icon — re-callable anytime, not just once at page load.
+// Also clears manual trim, since a fresh calibration supersedes any nudging
+// done against the old baseline.
+function recalibrateHeading() {
+  if (state.currentHeading !== null) state.baseHeading = state.currentHeading;
+  if (state.currentBeta !== null) state.basePitch = state.currentBeta;
+  state.yawTrim = 0;
+  state.pitchTrim = 0;
+}
+
+function onDeviceOrientation(e) {
+  const heading = getHeading(e);
+  if (heading === null && e.beta === null) return;
+  state.orientationActive = true;
+  hideLookHint();
+
+  if (heading !== null) {
+    state.currentHeading = heading;
+    if (state.baseHeading === null) state.baseHeading = heading; // auto-baseline until explicitly (re)calibrated
+    const relHeading = normalizeAngle180(heading - state.baseHeading);
+    state.yawFromSensor = -relHeading * DEG2RAD;
+  }
+
+  // Relative to basePitch rather than an assumed-vertical 90°, so pitch
+  // still lines up even if the phone wasn't held perfectly upright when
+  // calibrating. Actual clamping happens once trim is folded in, in animate().
+  const beta = e.beta ?? 90;
+  state.currentBeta = beta;
+  if (state.basePitch === null) state.basePitch = beta;
+  state.pitchFromSensor = (beta - state.basePitch) * DEG2RAD;
+}
+
+// Dragging is always a live fine-alignment *trim* on top of the sensor
+// reading (not a replacement for it) — so on phones with a compass, a
+// quick drag corrects residual indoor magnetometer drift without fighting
+// the next gyro update. On phones with no compass at all, the sensor
+// contributes 0 and this trim is the entire look direction.
+function setupDragFallback() {
+  const el = canvas;
+  const start = (x, y) => { state.dragActive = true; state.lastPointer = { x, y }; hideLookHint(); };
+  const move = (x, y) => {
+    if (!state.dragActive || !state.lastPointer) return;
+    const dx = x - state.lastPointer.x;
+    const dy = y - state.lastPointer.y;
+    state.lastPointer = { x, y };
+    state.yawTrim -= dx * 0.0045;
+    state.pitchTrim -= dy * 0.0045;
+  };
+  const end = () => { state.dragActive = false; state.lastPointer = null; };
+
+  el.addEventListener("pointerdown", (e) => start(e.clientX, e.clientY));
+  el.addEventListener("pointermove", (e) => move(e.clientX, e.clientY));
+  window.addEventListener("pointerup", end);
+  window.addEventListener("pointercancel", end);
+}
+setupDragFallback();
+
+/* ---------------- Nudge pad: small precise taps for fine alignment ---------------- */
+const NUDGE_STEP = 1.2 * DEG2RAD;
+function nudge(dYaw, dPitch) {
+  state.yawTrim += dYaw;
+  state.pitchTrim += dPitch;
+}
+function wireNudgeButton(id, dYaw, dPitch) {
+  const btn = document.getElementById(id);
+  let repeatTimer = null;
+  const fire = () => nudge(dYaw, dPitch);
+  const startRepeat = (ev) => {
+    ev.preventDefault();
+    fire();
+    repeatTimer = setInterval(fire, 110);
+  };
+  const stopRepeat = () => { clearInterval(repeatTimer); repeatTimer = null; };
+  btn.addEventListener("pointerdown", startRepeat);
+  btn.addEventListener("pointerup", stopRepeat);
+  btn.addEventListener("pointerleave", stopRepeat);
+  btn.addEventListener("pointercancel", stopRepeat);
+}
+wireNudgeButton("nudge-left", -NUDGE_STEP, 0);
+wireNudgeButton("nudge-right", NUDGE_STEP, 0);
+wireNudgeButton("nudge-up", 0, -NUDGE_STEP);
+wireNudgeButton("nudge-down", 0, NUDGE_STEP);
+document.getElementById("nudge-reset").addEventListener("click", () => {
+  state.yawTrim = 0;
+  state.pitchTrim = 0;
+});
+
+/* ---------------- Peephole reveal mode ---------------- */
+let peepholeMode = true;
+const peepholeBtn = document.getElementById("peephole-btn");
+function applyPeepholeMode() {
+  canvas.classList.toggle("peephole", peepholeMode);
+  peepholeBtn.classList.toggle("active", peepholeMode);
+}
+applyPeepholeMode();
+peepholeBtn.addEventListener("click", () => {
+  peepholeMode = !peepholeMode;
+  applyPeepholeMode();
+});
+
+function hideLookHint() {
+  document.getElementById("look-hint").classList.remove("show");
+}
+
+/* ---------------- Camera feed (getUserMedia) ---------------- */
+async function startCamera() {
+  const video = document.getElementById("camera-feed");
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    audio: false,
+  });
+  video.srcObject = stream;
+  await video.play();
+}
+
+/* ---------------- Start flow: request permissions, then boot ---------------- */
+const startScreen = document.getElementById("start-screen");
+const startBtn = document.getElementById("start-btn");
+const startError = document.getElementById("start-error");
+
+const calibPill = document.getElementById("calib-pill");
+
+async function requestMotionPermission() {
+  // iOS 13+ (Safari) requires this to run as close to the tap as possible —
+  // if anything async (like the camera's own permission dialog) runs first,
+  // Safari can silently drop the transient user-activation and never show
+  // the motion prompt at all, which is why gyro panning would appear dead
+  // with only drag working. So this MUST be the very first await in the
+  // click handler, before startCamera().
+  if (typeof DeviceOrientationEvent !== "undefined" &&
+      typeof DeviceOrientationEvent.requestPermission === "function") {
+    try {
+      const res = await DeviceOrientationEvent.requestPermission();
+      if (res === "granted") {
+        window.addEventListener("deviceorientation", onDeviceOrientation);
+        return "granted";
+      }
+      return "denied";
+    } catch (err) {
+      return "denied";
+    }
+  } else if (window.DeviceOrientationEvent) {
+    // Android / non-gated browsers: no explicit permission step needed.
+    window.addEventListener("deviceorientation", onDeviceOrientation);
+    return "granted";
+  }
+  return "unsupported";
+}
+
+startBtn.addEventListener("click", async () => {
+  startBtn.disabled = true;
+  startBtn.textContent = "Starting…";
+  try {
+    const motionStatus = await requestMotionPermission();
+    await startCamera();
+
+    if (motionStatus === "denied") {
+      calibPill.textContent = "Motion blocked — drag to look";
+      calibPill.style.background = "rgba(220,38,38,0.35)";
+      calibPill.style.borderColor = "rgba(248,113,113,0.5)";
+      document.getElementById("motion-banner").classList.add("show");
+    }
+
+    startScreen.style.display = "none";
+    document.getElementById("recalibrate-btn").classList.add("show");
+    document.getElementById("peephole-btn").classList.add("show");
+    document.getElementById("nudge-pad").classList.add("show");
+
+    if (motionStatus === "granted") {
+      // Let the calibration screen sit over the live camera feed so the
+      // presenter can actually see the real wall while aiming the phone.
+      document.getElementById("calibrate-overlay").classList.add("show");
+    } else {
+      // No compass to calibrate — go straight into drag-to-look mode.
+      document.getElementById("look-hint").classList.add("show");
+      state.hintTimer = setTimeout(hideLookHint, 5000);
+    }
+  } catch (err) {
+    startError.style.display = "block";
+    startError.textContent = "Camera access is required for this demo. Please allow camera permissions in your browser settings and reload.";
+    startBtn.disabled = false;
+    startBtn.textContent = "Try Again";
+  }
+});
+
+function finishCalibration() {
+  recalibrateHeading();
+  document.getElementById("calibrate-overlay").classList.remove("show");
+  document.getElementById("look-hint").classList.add("show");
+  state.hintTimer = setTimeout(hideLookHint, 5000);
+}
+document.getElementById("calibrate-btn").addEventListener("click", finishCalibration);
+document.getElementById("calibrate-skip-btn").addEventListener("click", finishCalibration);
+document.getElementById("recalibrate-btn").addEventListener("click", () => {
+  document.getElementById("calibrate-overlay").classList.add("show");
+});
+
+document.getElementById("motion-banner-close").addEventListener("click", () => {
+  document.getElementById("motion-banner").classList.remove("show");
+});
+document.getElementById("motion-retry-btn").addEventListener("click", async () => {
+  const status = await requestMotionPermission();
+  if (status === "granted") {
+    calibPill.textContent = "";
+    calibPill.style.background = "";
+    calibPill.style.borderColor = "";
+    document.getElementById("motion-banner").classList.remove("show");
+  }
+});
+
+/* ---------------- Reveal / Hide toggle ---------------- */
+const revealBtn = document.getElementById("reveal-btn");
+const revealLabel = document.getElementById("reveal-label");
+revealBtn.addEventListener("click", () => {
+  state.revealed = !state.revealed;
+  revealBtn.classList.toggle("hidden-state", !state.revealed);
+  revealLabel.textContent = state.revealed ? "Hide X-Ray" : "Show X-Ray";
+});
+
+/* ---------------- Caption chip ---------------- */
+const captionChip = document.getElementById("caption-chip");
+const captionText = document.getElementById("caption-text");
+const centerReticle = document.getElementById("center-reticle");
+
+function setCaption(key, label, dotColor) {
+  if (key === state.activeCaptionKey) return;
+  state.activeCaptionKey = key;
+  captionText.textContent = label;
+  captionChip.style.setProperty("--dot", dotColor);
+}
+
+/* ---------------- Resize ---------------- */
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+/* ---------------- Render loop ---------------- */
+const SMOOTHING = 0.12;        // gyro feel: lower = smoother/laggier, higher = snappier
+const REVEAL_SMOOTHING = 0.10; // toggle crossfade speed
+const forward = new THREE.Vector3();
+const WEIGHT_POWER = 1.6;      // higher = tighter/snappier crossfade between adjacent photos
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  // Sensor reading + manual trim are combined fresh every frame, so a drag
+  // or nudge-pad tap applies identically whether or not the gyro is active.
+  state.targetYaw = state.yawFromSensor + state.yawTrim;
+  state.targetPitch = THREE.MathUtils.clamp(state.pitchFromSensor + state.pitchTrim, -1.3, 1.3);
+
+  state.yaw += (state.targetYaw - state.yaw) * SMOOTHING;
+  state.pitch += (state.targetPitch - state.pitch) * SMOOTHING;
+  state.revealFactor += ((state.revealed ? 1 : 0) - state.revealFactor) * REVEAL_SMOOTHING;
+  centerReticle.style.opacity = state.revealFactor > 0.05 ? Math.min(1, state.revealFactor) * 0.55 : 0;
+
+  camera.rotation.order = "YXZ";
+  camera.rotation.y = state.yaw;
+  camera.rotation.x = state.pitch;
+
+  // Peephole mode is meant to read as a literal hole through the wall, not
+  // a ghosted overlay — the CSS mask already handles fading to the real
+  // camera feed at the circle's edge, so the content itself goes fully
+  // opaque here instead of blending at BLEND_OPACITY.
+  const activeBlend = peepholeMode ? 1 : BLEND_OPACITY;
+
+  if (usingPano) {
+    if (panoSphereRef) {
+      panoSphereRef.material.opacity = activeBlend * state.revealFactor;
+    }
+  } else {
+    camera.getWorldDirection(forward);
+
+    let bestKey = null, bestWeight = -1, bestDef = null;
+    for (const { mesh, dir, def } of photoMeshes) {
+      const dot = Math.max(0, forward.dot(dir));
+      const weight = Math.pow(dot, peepholeMode ? 1 : WEIGHT_POWER);
+      mesh.material.opacity = weight * activeBlend * state.revealFactor;
+      if (weight > bestWeight) { bestWeight = weight; bestKey = def.key; bestDef = def; }
+    }
+    if (wideSphereRef) {
+      wideSphereRef.material.opacity = (peepholeMode ? WIDE_BLEND_OPACITY + (1 - WIDE_BLEND_OPACITY) * 0.5 : WIDE_BLEND_OPACITY) * state.revealFactor;
+    }
+
+    if (bestDef && bestWeight > 0.3) {
+      setCaption(bestKey, bestDef.caption, bestDef.dot);
+      captionChip.classList.toggle("show", state.revealFactor > 0.05);
+    } else {
+      captionChip.classList.remove("show");
+    }
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>
