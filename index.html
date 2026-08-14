@@ -203,7 +203,7 @@
 
   /* ---------- Reveal toggle ---------- */
   #reveal-wrap {
-    position: fixed; left: 0; right: 0; bottom: max(108px, calc(96px + env(safe-area-inset-bottom)));
+    position: fixed; left: 0; right: 0; bottom: max(22px, env(safe-area-inset-bottom));
     z-index: 20; display: flex; justify-content: center; pointer-events: none;
   }
   #reveal-btn {
@@ -226,7 +226,7 @@
 
   /* ---------- Caption (replaces category legend chips) ---------- */
   #caption-wrap {
-    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    position: fixed; left: 0; right: 0; bottom: max(78px, calc(66px + env(safe-area-inset-bottom))); z-index: 20;
     padding: 10px 16px max(16px, env(safe-area-inset-bottom));
     display: flex; justify-content: center;
     background: linear-gradient(to top, rgba(4,8,16,0.85), rgba(4,8,16,0));
@@ -279,7 +279,7 @@
   <div id="top-bar-controls">
     <div id="calib-pill"></div>
     <button id="peephole-btn" title="Toggle peephole mode">⭕</button>
-    <button id="recalibrate-btn" title="Recalibrate direction">🧭</button>
+    <button id="recalibrate-btn" title="Recalibrate direction"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></button>
   </div>
 </div>
 
@@ -298,7 +298,7 @@
 <!-- Calibration overlay: aligns the panorama's "front" to a real wall in the room -->
 <div id="calibrate-overlay">
   <div id="calibrate-card">
-    <div class="icon">🧭</div>
+    <div class="icon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></div>
     <h2>Calibrate Direction</h2>
     <p>Stand where you'll hold the phone during the demo and face the <b>front screen</b> — that's the wall the demo treats as "straight ahead." Then tap Calibrate.</p>
     <button id="calibrate-btn">Calibrate Now</button>
