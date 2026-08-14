@@ -300,7 +300,7 @@
   <div id="calibrate-card">
     <div class="icon">🧭</div>
     <h2>Calibrate Direction</h2>
-    <p>Stand where you'll hold the phone during the demo, face the wall you captured as the <b>start</b> of your panorama, then tap Calibrate.</p>
+    <p>Stand where you'll hold the phone during the demo and face the <b>front screen</b> — that's the wall the demo treats as "straight ahead." Then tap Calibrate.</p>
     <button id="calibrate-btn">Calibrate Now</button>
     <button id="calibrate-skip-btn">Skip — use current facing</button>
   </div>
@@ -795,11 +795,13 @@ startBtn.addEventListener("click", async () => {
     startScreen.style.display = "none";
     document.getElementById("recalibrate-btn").classList.add("show");
     document.getElementById("peephole-btn").classList.add("show");
-    document.getElementById("nudge-pad").classList.add("show");
 
     if (motionStatus === "granted") {
       // Let the calibration screen sit over the live camera feed so the
       // presenter can actually see the real wall while aiming the phone.
+      // Nudge pad only needs to be visible for this fine-aim step, not
+      // for the rest of the session — see finishCalibration().
+      document.getElementById("nudge-pad").classList.add("show");
       document.getElementById("calibrate-overlay").classList.add("show");
     } else {
       // No compass to calibrate — go straight into drag-to-look mode.
@@ -817,12 +819,14 @@ startBtn.addEventListener("click", async () => {
 function finishCalibration() {
   recalibrateHeading();
   document.getElementById("calibrate-overlay").classList.remove("show");
+  document.getElementById("nudge-pad").classList.remove("show");
   document.getElementById("look-hint").classList.add("show");
   state.hintTimer = setTimeout(hideLookHint, 5000);
 }
 document.getElementById("calibrate-btn").addEventListener("click", finishCalibration);
 document.getElementById("calibrate-skip-btn").addEventListener("click", finishCalibration);
 document.getElementById("recalibrate-btn").addEventListener("click", () => {
+  document.getElementById("nudge-pad").classList.add("show");
   document.getElementById("calibrate-overlay").classList.add("show");
 });
 
