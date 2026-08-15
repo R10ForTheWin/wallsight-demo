@@ -736,7 +736,9 @@ function onDeviceOrientation(e) {
     state.currentGamma = e.gamma;
     if (state.baseGamma === null) state.baseGamma = e.gamma; // auto-baseline until explicitly (re)calibrated
     const relGamma = normalizeAngle180(e.gamma - state.baseGamma);
-    state.yawFromSensor = -relGamma * DEG2RAD;
+    // Confirmed inverted on-device (panning left moved the image right) —
+    // gamma's sign convention isn't the same as compass heading's was.
+    state.yawFromSensor = relGamma * DEG2RAD;
   }
 
   // Relative to basePitch rather than an assumed-vertical 90°, so pitch
