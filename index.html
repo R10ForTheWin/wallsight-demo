@@ -155,7 +155,10 @@
      up with the actual whiteboard before locking it in as "straight ahead". */
   #calib-target {
     position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%);
-    width: min(78vw, 460px); aspect-ratio: 2 / 1;
+    /* Matched to the actual whiteboard's proportions (~4:3), measured off a
+       reference photo of the room from a typical seat, not a generic
+       "wide screen" guess. */
+    width: min(64vw, 380px); aspect-ratio: 4 / 3;
     pointer-events: none;
   }
   #calib-target .frame {
