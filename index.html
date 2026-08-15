@@ -25,14 +25,23 @@
     position: fixed; inset: 0; width: 100%; height: 100%;
     z-index: 1; touch-action: none;
   }
-  /* Peephole mode: only a soft circle at screen-center shows the x-ray
-     layer, feathering out to plain camera feed — rest of the canvas is
-     masked to transparent. vmin-based radii keep it a true circle
-     regardless of viewport aspect (percentage stops would go elliptical). */
+  /* Peephole mode: a circle at screen-center shows the x-ray layer with a
+     crisp cutoff (not a soft feather) — rest of the canvas is masked to
+     transparent. vmin-based radius keeps it a true circle regardless of
+     viewport aspect (percentage stops would go elliptical). The edge itself
+     reads via #peephole-ring below, not a gradient fade. */
   #three-canvas.peephole {
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 0, #000 40vmin, transparent 46vmin);
-    mask-image: radial-gradient(circle at 50% 50%, #000 0, #000 40vmin, transparent 46vmin);
+    -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 0, #000 46vmin, transparent 46.4vmin);
+    mask-image: radial-gradient(circle at 50% 50%, #000 0, #000 46vmin, transparent 46.4vmin);
   }
+  #peephole-ring {
+    position: fixed; z-index: 16; left: 50%; top: 50%;
+    width: 92vmin; height: 92vmin; margin: -46vmin 0 0 -46vmin;
+    border-radius: 50%; pointer-events: none; display: none;
+    border: 1.5px solid rgba(147,197,253,0.8);
+    box-shadow: 0 0 10px rgba(59,130,246,0.4), inset 0 0 10px rgba(59,130,246,0.25);
+  }
+  #peephole-ring.show { display: block; }
 
   /* ---------- Start / Permission overlay ---------- */
   #start-screen {
@@ -185,7 +194,9 @@
     width: 100%; background: linear-gradient(135deg, #3b82f6, #2f6fed);
     color: #fff; border: none; border-radius: 12px;
     padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: opacity 0.15s;
   }
+  #calibrate-btn:disabled { opacity: 0.6; cursor: default; }
   /* ---------- Reveal fanfare: sparkle-wipe canvas ---------- */
   #fx-canvas {
     position: fixed; inset: 0; z-index: 45; pointer-events: none;
@@ -234,14 +245,14 @@
   #labels-wrap.show { display: flex; }
   #labels-row {
     pointer-events: auto;
-    display: flex; flex-wrap: wrap; justify-content: center;
-    gap: 8px; max-width: 420px;
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 8px; width: 100%; max-width: 320px;
   }
   .label-pill {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
     background: rgba(10,16,28,0.72); border: 1px solid rgba(255,255,255,0.16);
     backdrop-filter: blur(10px);
-    border-radius: 999px; padding: 10px 16px;
+    border-radius: 999px; padding: 10px 14px;
     color: #cbd5e1; font-size: 13.5px; font-weight: 600;
     box-shadow: 0 6px 20px rgba(0,0,0,0.35);
   }
@@ -292,6 +303,7 @@
 
 <!-- Faint center reticle: aiming aid for the peephole and for manual trim -->
 <div id="center-reticle"></div>
+<div id="peephole-ring"></div>
 
 <!-- Nudge pad: fine yaw/pitch trim on top of sensor calibration -->
 <div id="nudge-pad">
@@ -794,9 +806,11 @@ document.getElementById("nudge-reset").addEventListener("click", () => {
 /* ---------------- Peephole reveal mode ---------------- */
 let peepholeMode = true;
 const peepholeBtn = document.getElementById("peephole-btn");
+const peepholeRing = document.getElementById("peephole-ring");
 function applyPeepholeMode() {
   canvas.classList.toggle("peephole", peepholeMode);
   peepholeBtn.classList.toggle("active", peepholeMode);
+  peepholeRing.classList.toggle("show", peepholeMode);
 }
 applyPeepholeMode();
 peepholeBtn.addEventListener("click", () => {
@@ -911,6 +925,8 @@ startBtn.addEventListener("click", async () => {
 const fxCanvas = document.getElementById("fx-canvas");
 const fxCtx = fxCanvas.getContext("2d");
 const SPARKLE_COLORS = ["#ffffff", "#93c5fd", "#ffb300", "#ff1744", "#00e5ff", "#39ff14"];
+const fxLogo = new Image();
+fxLogo.src = "logo-icon.png";
 
 function resizeFx() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -922,6 +938,11 @@ resizeFx();
 window.addEventListener("resize", resizeFx);
 
 function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+function easeOutBack(t) {
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
 
 function drawSpark(ctx, x, y, r) {
   ctx.moveTo(x, y - r);
@@ -940,15 +961,15 @@ function fireSparkleWipe() {
   const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const cx = W / 2, cy = H / 2;
   const maxR = Math.hypot(W, H) / 2 + 40;
-  const duration = reduceMotion ? 1 : 1300;
+  const duration = reduceMotion ? 1 : 1500;
 
   // Two populations: a dense band riding just behind the wipe's leading
   // edge (reads as the wipe itself sparkling), plus an ambient scatter
   // across the whole disc so the reveal feels like it fills the screen
   // with sparkle, not just a thin ring.
   const particles = [];
-  const N_EDGE = reduceMotion ? 0 : 90;
-  const N_AMBIENT = reduceMotion ? 0 : 55;
+  const N_EDGE = reduceMotion ? 0 : 150;
+  const N_AMBIENT = reduceMotion ? 0 : 100;
   for (let i = 0; i < N_EDGE; i++) {
     particles.push({
       angle: Math.random() * Math.PI * 2,
@@ -972,7 +993,7 @@ function fireSparkleWipe() {
     });
   }
   // A few bigger "hero" sparks for punctuation
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 14; i++) {
     particles.push({
       angle: Math.random() * Math.PI * 2,
       dist: maxR * (0.35 + Math.random() * 0.5),
@@ -1033,6 +1054,36 @@ function fireSparkleWipe() {
     }
     fxCtx.restore();
 
+    // Logo flourish: pops in at center, holds, fades as the sparkles
+    // disperse. Drawn in normal (not additive) compositing so it stays
+    // crisp/branded instead of blowing out like the glow/sparkles.
+    const logoInEnd = 0.22, logoHoldEnd = 0.55, logoOutEnd = 0.82;
+    let logoAlpha = 0, logoScale = 1;
+    if (t < logoInEnd) {
+      const lt = t / logoInEnd;
+      logoAlpha = lt;
+      logoScale = 0.5 + easeOutBack(lt) * 0.5;
+    } else if (t < logoHoldEnd) {
+      logoAlpha = 1;
+      logoScale = 1;
+    } else if (t < logoOutEnd) {
+      const lt = (t - logoHoldEnd) / (logoOutEnd - logoHoldEnd);
+      logoAlpha = 1 - lt;
+      logoScale = 1 + lt * 0.18;
+    }
+    if (logoAlpha > 0 && fxLogo.complete && fxLogo.naturalWidth) {
+      const logoW = Math.min(W, H) * 0.24;
+      const logoH = logoW * (fxLogo.naturalHeight / fxLogo.naturalWidth);
+      fxCtx.save();
+      fxCtx.globalAlpha = Math.max(0, logoAlpha);
+      fxCtx.shadowColor = "#3b82f6";
+      fxCtx.shadowBlur = 26;
+      fxCtx.translate(cx, cy);
+      fxCtx.scale(logoScale, logoScale);
+      fxCtx.drawImage(fxLogo, -logoW / 2, -logoH / 2, logoW, logoH);
+      fxCtx.restore();
+    }
+
     if (t < 1) requestAnimationFrame(frame);
     else fxCtx.clearRect(0, 0, W, H);
   }
@@ -1040,15 +1091,27 @@ function fireSparkleWipe() {
 }
 
 function runCalibration() {
-  recalibrateHeading();
-  document.getElementById("calibrate-overlay").classList.remove("show");
-  document.getElementById("nudge-pad").classList.remove("show");
-  document.getElementById("look-hint").classList.add("show");
-  state.hintTimer = setTimeout(hideLookHint, 5000);
-  // The reveal only ever turns on here — this is the one moment the wall
-  // is meant to visibly "disappear," not an ambient fade-in.
-  state.revealed = true;
-  fireSparkleWipe();
+  // Tapping a button at the bottom of the screen with your thumb, while
+  // holding the phone up in aiming position, reliably nudges the phone's
+  // aim right at the moment of the tap — so capturing the heading/pitch
+  // baseline instantly at tap-time locks in that nudge, not the aim the
+  // user actually held. Give it a beat to settle before capturing.
+  const btn = document.getElementById("calibrate-btn");
+  btn.disabled = true;
+  btn.textContent = "Hold still…";
+  setTimeout(() => {
+    recalibrateHeading();
+    document.getElementById("calibrate-overlay").classList.remove("show");
+    document.getElementById("nudge-pad").classList.remove("show");
+    document.getElementById("look-hint").classList.add("show");
+    state.hintTimer = setTimeout(hideLookHint, 5000);
+    // The reveal only ever turns on here — this is the one moment the wall
+    // is meant to visibly "disappear," not an ambient fade-in.
+    state.revealed = true;
+    fireSparkleWipe();
+    btn.disabled = false;
+    btn.textContent = "Calibrate";
+  }, 500);
 }
 document.getElementById("calibrate-btn").addEventListener("click", runCalibration);
 document.getElementById("recalibrate-btn").addEventListener("click", () => {
