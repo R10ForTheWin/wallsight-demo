@@ -105,14 +105,6 @@
   }
   #peephole-btn.show { display: flex; }
   #peephole-btn.active { background: rgba(47,111,237,0.35); border-color: rgba(96,150,255,0.55); }
-  #labels-btn {
-    width: 30px; height: 30px; border-radius: 50%; font-size: 14px; line-height: 1;
-    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
-    backdrop-filter: blur(6px); color: #fff; cursor: pointer;
-    display: none; align-items: center; justify-content: center;
-  }
-  #labels-btn.show { display: flex; }
-  #labels-btn.active { background: rgba(47,111,237,0.35); border-color: rgba(96,150,255,0.55); }
 
   /* ---------- Label legend: shown only while the annotation layer is on ---------- */
   #label-legend {
@@ -226,12 +218,13 @@
     font-weight: 600; padding: 7px 12px; border-radius: 7px; cursor: pointer;
   }
 
-  /* ---------- Reveal toggle ---------- */
-  #reveal-wrap {
+  /* ---------- Labels toggle (bottom pill, same slot the X-Ray toggle used to occupy) ---------- */
+  #labels-wrap {
     position: fixed; left: 0; right: 0; bottom: max(22px, env(safe-area-inset-bottom));
-    z-index: 20; display: flex; justify-content: center; pointer-events: none;
+    z-index: 20; display: none; justify-content: center; pointer-events: none;
   }
-  #reveal-btn {
+  #labels-wrap.show { display: flex; }
+  #labels-pill-btn {
     pointer-events: auto;
     display: flex; align-items: center; gap: 10px;
     background: rgba(10,16,28,0.72); border: 1px solid rgba(255,255,255,0.16);
@@ -240,13 +233,13 @@
     color: #fff; font-size: 15px; font-weight: 600;
     box-shadow: 0 6px 20px rgba(0,0,0,0.35);
   }
-  #reveal-btn .dot {
+  #labels-pill-btn .dot {
     width: 10px; height: 10px; border-radius: 50%;
-    background: #22c55e; box-shadow: 0 0 10px #22c55e;
+    background: #64748b; box-shadow: none;
     transition: background 0.2s, box-shadow 0.2s;
   }
-  #reveal-btn.hidden-state .dot {
-    background: #64748b; box-shadow: none;
+  #labels-pill-btn.active .dot {
+    background: #22c55e; box-shadow: 0 0 10px #22c55e;
   }
 
   /* ---------- Caption (replaces category legend chips) ---------- */
@@ -304,7 +297,6 @@
   <div id="top-bar-controls">
     <div id="calib-pill"></div>
     <button id="peephole-btn" title="Toggle peephole mode">⭕</button>
-    <button id="labels-btn" title="Toggle stud/electrical/plumbing labels"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg></button>
     <button id="recalibrate-btn" title="Recalibrate direction"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></button>
   </div>
 </div>
@@ -355,9 +347,9 @@
   <span>Pan &amp; tilt your phone to look around</span>
 </div>
 
-<!-- Reveal toggle -->
-<div id="reveal-wrap">
-  <button id="reveal-btn"><span class="dot"></span><span id="reveal-label">Hide X-Ray</span></button>
+<!-- Stud/electrical/plumbing labels toggle -->
+<div id="labels-wrap">
+  <button id="labels-pill-btn"><span class="dot"></span><span id="labels-pill-label">Show Labels</span></button>
 </div>
 
 <!-- Dynamic caption (replaces the old category legend chips) -->
@@ -552,7 +544,14 @@ function featherTexture(sourceTex) {
 
 /* ---------------- Build the direction-mapped photo rig ---------------- */
 const PLANE_DISTANCE = 5;
-const PLANE_SIZE = 9; // world units; generously overfills the FOV at PLANE_DISTANCE
+// World units. Each plane is fixed in space (oriented once via lookAt, not
+// re-aimed at the camera every frame), so tilting the phone away from dead-
+// center on a direction is really rotating the *view ray* off that plane's
+// face — a plane covers roughly ±atan((size/2)/distance) before its edge
+// enters frame. 9 only covered ~±42°, so combining a downward pitch with
+// the ~35° half-FOV could expose the edge (visible seam above the bottom
+// UI). 22 covers ~±66°, comfortable margin for realistic tilt.
+const PLANE_SIZE = 22;
 
 const photoMeshes = []; // { mesh, dir: Vector3, def }
 
@@ -788,11 +787,13 @@ peepholeBtn.addEventListener("click", () => {
 });
 
 /* ---------------- Stud/electrical/plumbing label layer ---------------- */
-const labelsBtn = document.getElementById("labels-btn");
+const labelsPillBtn = document.getElementById("labels-pill-btn");
+const labelsPillLabel = document.getElementById("labels-pill-label");
 const labelLegend = document.getElementById("label-legend");
-labelsBtn.addEventListener("click", () => {
+labelsPillBtn.addEventListener("click", () => {
   state.showLabels = !state.showLabels;
-  labelsBtn.classList.toggle("active", state.showLabels);
+  labelsPillBtn.classList.toggle("active", state.showLabels);
+  labelsPillLabel.textContent = state.showLabels ? "Hide Labels" : "Show Labels";
   labelLegend.classList.toggle("show", state.showLabels);
 });
 
@@ -862,7 +863,7 @@ startBtn.addEventListener("click", async () => {
     startScreen.style.display = "none";
     document.getElementById("recalibrate-btn").classList.add("show");
     document.getElementById("peephole-btn").classList.add("show");
-    document.getElementById("labels-btn").classList.add("show");
+    document.getElementById("labels-wrap").classList.add("show");
 
     if (motionStatus === "granted") {
       // Let the calibration screen sit over the live camera feed so the
@@ -909,15 +910,6 @@ document.getElementById("motion-retry-btn").addEventListener("click", async () =
     calibPill.style.borderColor = "";
     document.getElementById("motion-banner").classList.remove("show");
   }
-});
-
-/* ---------------- Reveal / Hide toggle ---------------- */
-const revealBtn = document.getElementById("reveal-btn");
-const revealLabel = document.getElementById("reveal-label");
-revealBtn.addEventListener("click", () => {
-  state.revealed = !state.revealed;
-  revealBtn.classList.toggle("hidden-state", !state.revealed);
-  revealLabel.textContent = state.revealed ? "Hide X-Ray" : "Show X-Ray";
 });
 
 /* ---------------- Caption chip ---------------- */
