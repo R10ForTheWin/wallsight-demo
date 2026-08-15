@@ -638,7 +638,19 @@ async function buildPhotoRig() {
         side: THREE.DoubleSide,
         depthWrite: false,
       });
-      alignmentMarkerMesh = new THREE.Mesh(geo, markerMat);
+      // Deliberately NOT the shared oversized `geo` (PLANE_SIZE=50) — that
+      // size exists so the *photo* never shows an edge seam at any pan
+      // angle, but it means the crosshair pattern (drawn to look right on
+      // a normal-sized plane) would cover a huge swath of that huge plane —
+      // only visible as an extreme close-up of one small piece of it (a
+      // magenta "blob", not a recognizable target). This plane is sized so
+      // the rectangle (66% of its texture width) actually subtends about
+      // the same on-screen width as the fixed HTML #calib-target (~64% of
+      // screen width) when centered, at PLANE_DISTANCE with a 70° FOV.
+      const visibleWidthAtDistance = 2 * PLANE_DISTANCE * Math.tan(35 * Math.PI / 180);
+      const markerPlaneSize = (0.64 * visibleWidthAtDistance) / 0.66;
+      const markerGeo = new THREE.PlaneGeometry(markerPlaneSize, markerPlaneSize);
+      alignmentMarkerMesh = new THREE.Mesh(markerGeo, markerMat);
       alignmentMarkerMesh.position.copy(mesh.position);
       alignmentMarkerMesh.quaternion.copy(mesh.quaternion);
       alignmentMarkerMesh.renderOrder = 2;
