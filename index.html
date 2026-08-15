@@ -163,10 +163,13 @@
      feed while calibrating, so the presenter can visually line the phone
      up with the actual whiteboard before locking it in as "straight ahead". */
   #calib-target {
-    position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%);
+    position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
     /* Matched to the actual whiteboard's proportions (~4:3), measured off a
        reference photo of the room from a typical seat, not a generic
-       "wide screen" guess. */
+       "wide screen" guess. 46% (not the true optical-center 50%) leaves
+       clearance for the card below — the 3D alignment marker always
+       renders at true screen center, so this residual few-percent gap is
+       a known, small, deliberate trade-off, not a bug. */
     width: min(64vw, 380px); aspect-ratio: 4 / 3;
     pointer-events: none;
   }
@@ -327,7 +330,7 @@
   <div id="calibrate-card">
     <div class="icon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></div>
     <h2>Calibrate Direction</h2>
-    <p>Point at the center of the whiteboard on the front wall, then tap Calibrate.</p>
+    <p id="calibrate-card-text">Point at the center of the whiteboard on the front wall, then tap Calibrate.</p>
     <button id="calibrate-btn">Calibrate</button>
   </div>
 </div>
@@ -518,6 +521,39 @@ function makePlaceholderTexture(label) {
   return tex;
 }
 
+/* Bold crosshair + rectangle target, shown in place of the front photo only
+   while confirming calibration (see calibrationPhase) — mirrors the fixed
+   HTML #calib-target bullseye's shape exactly, so "nudge this marker until
+   it sits inside that outline" is an unambiguous visual match instead of
+   trying to judge alignment against a muted construction photo. */
+function makeAlignmentMarkerTexture() {
+  const W = 1024, H = 768;
+  const cvs = document.createElement("canvas");
+  cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext("2d");
+  const cx = W / 2, cy = H / 2;
+  const color = "#ff2ecc";
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 24;
+
+  // rectangle, same 4:3 shape as #calib-target
+  const rw = W * 0.66, rh = rw * 0.75;
+  ctx.lineWidth = 10;
+  ctx.strokeRect(cx - rw / 2, cy - rh / 2, rw, rh);
+
+  // bullseye, same proportions as the HTML version
+  ctx.lineWidth = 9;
+  ctx.beginPath(); ctx.arc(cx, cy, rw * 0.21, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, rw * 0.12, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, rw * 0.025, 0, Math.PI * 2); ctx.fill();
+
+  const tex = new THREE.CanvasTexture(cvs);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 /* Bakes a soft radial alpha feather into a copy of the loaded texture so
    each photo's edges dissolve into the surrounding camera feed / backdrop
    instead of showing a hard rectangular seam. */
@@ -567,6 +603,7 @@ const PLANE_DISTANCE = 5;
 const PLANE_SIZE = 50;
 
 const photoMeshes = []; // { mesh, annotMeshes: {studs,electrical,plumbing,hvac}, dir: Vector3, def }
+let alignmentMarkerMesh = null; // bold target shown only while confirming calibration — see makeAlignmentMarkerTexture
 
 async function buildPhotoRig() {
   for (const def of PHOTO_DEFS) {
@@ -588,6 +625,21 @@ async function buildPhotoRig() {
     mesh.lookAt(0, 0, 0);
     mesh.renderOrder = 0;
     wallGroup.add(mesh);
+
+    if (def.key === "front") {
+      const markerMat = new THREE.MeshBasicMaterial({
+        map: makeAlignmentMarkerTexture(),
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      alignmentMarkerMesh = new THREE.Mesh(geo, markerMat);
+      alignmentMarkerMesh.position.copy(mesh.position);
+      alignmentMarkerMesh.quaternion.copy(mesh.quaternion);
+      alignmentMarkerMesh.renderOrder = 2;
+      wallGroup.add(alignmentMarkerMesh);
+    }
 
     // Per-category label layers (studs/electrical/plumbing/hvac) — same
     // plane, drawn a hair closer to camera (renderOrder) so each sits
@@ -1096,34 +1148,63 @@ function fireSparkleWipe() {
   requestAnimationFrame(frame);
 }
 
+// Two-phase calibration: the compass is not reliable to auto-lock a precise
+// heading this close to a wall this full of steel studs/conduit (the whole
+// subject of the demo deflects its own calibration target) — so instead of
+// trusting one compass reading blind, "Calibrate" gets you close and then
+// hands control to the nudge pad for a quick visual confirm before it
+// commits. Re-callable via the recalibrate icon, same two phases each time.
+let calibrationPhase = "initial"; // "initial" | "confirming"
+const calibrateBtn = document.getElementById("calibrate-btn");
+const calibrateCardText = document.getElementById("calibrate-card-text");
+
 function runCalibration() {
+  if (calibrationPhase === "confirming") {
+    confirmCalibration();
+    return;
+  }
   // Tapping a button at the bottom of the screen with your thumb, while
   // holding the phone up in aiming position, reliably nudges the phone's
   // aim right at the moment of the tap — so capturing the heading/pitch
   // baseline instantly at tap-time locks in that nudge, not the aim the
   // user actually held. Give it a beat to settle before capturing.
-  const btn = document.getElementById("calibrate-btn");
-  btn.disabled = true;
-  btn.textContent = "Hold still…";
+  calibrateBtn.disabled = true;
+  calibrateBtn.textContent = "Hold still…";
   setTimeout(() => {
     recalibrateHeading();
-    document.getElementById("calibrate-overlay").classList.remove("show");
-    document.getElementById("nudge-pad").classList.remove("show");
-    document.getElementById("look-hint").classList.add("show");
-    state.hintTimer = setTimeout(hideLookHint, 5000);
-    // The reveal only ever turns on here — this is the one moment the wall
-    // is meant to visibly "disappear," not an ambient fade-in.
+    // Rough auto-aim is locked — start the reveal fading in now (dimmed
+    // under the still-open overlay) so it's actually visible to check
+    // against the bullseye/real whiteboard, instead of committing blind.
     state.revealed = true;
-    fireSparkleWipe();
-    btn.disabled = false;
-    btn.textContent = "Calibrate";
+    calibrationPhase = "confirming";
+    calibrateCardText.textContent = "Use the arrows to nudge the pink target until it lands inside the outline above — then tap Looks Good.";
+    calibrateBtn.textContent = "Looks Good";
+    calibrateBtn.disabled = false;
   }, 500);
 }
+
+function confirmCalibration() {
+  document.getElementById("calibrate-overlay").classList.remove("show");
+  document.getElementById("nudge-pad").classList.remove("show");
+  document.getElementById("look-hint").classList.add("show");
+  state.hintTimer = setTimeout(hideLookHint, 5000);
+  // The fanfare is saved for this final commit — the moment the presenter
+  // has actually confirmed alignment, not the rough auto-aim guess.
+  fireSparkleWipe();
+  calibrationPhase = "initial";
+  calibrateBtn.textContent = "Calibrate";
+  calibrateCardText.textContent = "Point at the center of the whiteboard on the front wall, then tap Calibrate.";
+}
+
 document.getElementById("calibrate-btn").addEventListener("click", runCalibration);
 document.getElementById("recalibrate-btn").addEventListener("click", () => {
-  // Re-aiming hides the reveal again until the next Calibrate tap, so the
-  // "wipe" fanfare always means the same thing: calibration just locked in.
+  // Re-aiming hides the reveal again until the next confirmed calibration,
+  // so the "wipe" fanfare always means the same thing: calibration was
+  // just confirmed, not just guessed at.
   state.revealed = false;
+  calibrationPhase = "initial";
+  calibrateBtn.textContent = "Calibrate";
+  calibrateCardText.textContent = "Point at the center of the whiteboard on the front wall, then tap Calibrate.";
   document.getElementById("nudge-pad").classList.add("show");
   document.getElementById("calibrate-overlay").classList.add("show");
 });
@@ -1192,7 +1273,7 @@ function animate() {
       plumbing: state.showPlumbing,
       hvac: state.showHvac,
     };
-    for (const { mesh, annotMeshes, dir } of photoMeshes) {
+    for (const { mesh, annotMeshes, dir, def } of photoMeshes) {
       const dot = Math.max(0, forward.dot(dir));
       const weight = Math.pow(dot, peepholeMode ? 1 : WEIGHT_POWER);
       mesh.material.opacity = weight * activeBlend * state.revealFactor;
@@ -1201,6 +1282,9 @@ function animate() {
         if (annotMesh) {
           annotMesh.material.opacity = categoryOn[cat] ? weight * activeBlend * state.revealFactor : 0;
         }
+      }
+      if (def.key === "front" && alignmentMarkerMesh) {
+        alignmentMarkerMesh.material.opacity = calibrationPhase === "confirming" ? weight * activeBlend * state.revealFactor : 0;
       }
     }
     if (wideSphereRef) {
