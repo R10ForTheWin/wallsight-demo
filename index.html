@@ -130,8 +130,12 @@
 
   /* ---------- Nudge pad: fine yaw/pitch trim ---------- */
   #nudge-pad {
-    position: fixed; left: 14px; bottom: max(108px, calc(96px + env(safe-area-inset-bottom)));
-    z-index: 20; display: none;
+    /* Only ever shown during calibration, over #calibrate-overlay — anchored
+       top-left, below the header, since the calibrate-card is bottom-
+       anchored at nearly full width and was completely covering the old
+       bottom-left position (same z-index stack, opaque card on top). */
+    position: fixed; left: 14px; top: max(70px, calc(58px + env(safe-area-inset-top)));
+    z-index: 41; display: none;
     grid-template-columns: 30px 30px 30px;
     grid-template-rows: 30px 30px 30px;
     gap: 3px;
