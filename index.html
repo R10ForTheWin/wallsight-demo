@@ -183,9 +183,10 @@
     color: #fff; border: none; border-radius: 12px;
     padding: 13px; font-size: 15px; font-weight: 600; cursor: pointer;
   }
-  #calibrate-skip-btn {
-    width: 100%; background: transparent; border: none; color: #8b9ab5;
-    font-size: 13px; padding: 12px; cursor: pointer;
+  /* ---------- Reveal fanfare: sparkle-wipe canvas ---------- */
+  #fx-canvas {
+    position: fixed; inset: 0; z-index: 45; pointer-events: none;
+    width: 100%; height: 100%;
   }
 
   /* ---------- Missing-assets dev banner ---------- */
@@ -312,10 +313,14 @@
     <div class="icon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></div>
     <h2>Calibrate Direction</h2>
     <p>Point at the center of the whiteboard on the front wall, then tap Calibrate.</p>
-    <button id="calibrate-btn">Calibrate Now</button>
-    <button id="calibrate-skip-btn">Skip — use current facing</button>
+    <button id="calibrate-btn">Calibrate</button>
   </div>
 </div>
+
+<!-- Reveal fanfare: a sparkle burst riding an expanding wipe ring, fired once
+     right when calibration locks in, so the wall reads as visibly
+     "disappearing" rather than just fading in ambiently. -->
+<canvas id="fx-canvas"></canvas>
 
 <!-- Dev-only banner shown when photo assets are missing (placeholders in use) -->
 <div id="asset-banner"><span class="close" id="asset-banner-close">✕</span><span id="asset-banner-text"></span></div>
@@ -377,8 +382,8 @@ import * as THREE from "three";
    ============================================================ */
 
 const state = {
-  revealed: true,
-  revealFactor: 1,       // smoothed 0..1, drives the crossfade toggle transition
+  revealed: false,        // stays false until calibration locks in — see runCalibration()
+  revealFactor: 0,       // smoothed 0..1, drives the crossfade toggle transition
   showStuds: false,
   showElectrical: false,
   showPlumbing: false,
@@ -869,14 +874,14 @@ startBtn.addEventListener("click", async () => {
       // Let the calibration screen sit over the live camera feed so the
       // presenter can actually see the real wall while aiming the phone.
       // Nudge pad only needs to be visible for this fine-aim step, not
-      // for the rest of the session — see finishCalibration().
-      document.getElementById("nudge-pad").classList.add("show");
-      document.getElementById("calibrate-overlay").classList.add("show");
-    } else {
-      // No compass to calibrate — go straight into drag-to-look mode.
-      document.getElementById("look-hint").classList.add("show");
-      state.hintTimer = setTimeout(hideLookHint, 5000);
+      // for the rest of the session — see runCalibration().
     }
+    // The X-ray reveal stays off (state.revealed starts false) until the
+    // presenter explicitly taps Calibrate, even without a compass — that
+    // tap is what fires the reveal, recalibrateHeading() just safely
+    // no-ops if there's no sensor reading yet to lock a baseline from.
+    document.getElementById("nudge-pad").classList.add("show");
+    document.getElementById("calibrate-overlay").classList.add("show");
   } catch (err) {
     startError.style.display = "block";
     startError.textContent = "Camera access is required for this demo. Please allow camera permissions in your browser settings and reload.";
@@ -885,16 +890,113 @@ startBtn.addEventListener("click", async () => {
   }
 });
 
-function finishCalibration() {
+/* ---------------- Reveal fanfare: sparkle burst riding an expanding wipe ring ---------------- */
+const fxCanvas = document.getElementById("fx-canvas");
+const fxCtx = fxCanvas.getContext("2d");
+const SPARKLE_COLORS = ["#ffffff", "#93c5fd", "#ffb300", "#ff1744", "#00e5ff", "#39ff14"];
+
+function resizeFx() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  fxCanvas.width = window.innerWidth * dpr;
+  fxCanvas.height = window.innerHeight * dpr;
+  fxCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeFx();
+window.addEventListener("resize", resizeFx);
+
+function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+function drawSpark(ctx, x, y, r) {
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x + r * 0.28, y - r * 0.28);
+  ctx.lineTo(x + r, y);
+  ctx.lineTo(x + r * 0.28, y + r * 0.28);
+  ctx.lineTo(x, y + r);
+  ctx.lineTo(x - r * 0.28, y + r * 0.28);
+  ctx.lineTo(x - r, y);
+  ctx.lineTo(x - r * 0.28, y - r * 0.28);
+  ctx.closePath();
+}
+
+function fireSparkleWipe() {
+  const W = window.innerWidth, H = window.innerHeight;
+  const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const cx = W / 2, cy = H / 2;
+  const maxR = Math.hypot(W, H) / 2 + 40;
+  const duration = reduceMotion ? 1 : 950;
+
+  const particles = [];
+  const N = reduceMotion ? 0 : 46;
+  for (let i = 0; i < N; i++) {
+    particles.push({
+      angle: Math.random() * Math.PI * 2,
+      dist: maxR * (0.55 + Math.random() * 0.5),
+      size: 2 + Math.random() * 3.5,
+      color: SPARKLE_COLORS[(Math.random() * SPARKLE_COLORS.length) | 0],
+      delay: Math.random() * 150,
+      twinkle: Math.random() * Math.PI * 2,
+    });
+  }
+
+  const start = performance.now();
+  function frame(now) {
+    const t = Math.min(1, (now - start) / duration);
+    fxCtx.clearRect(0, 0, W, H);
+    fxCtx.save();
+    fxCtx.globalCompositeOperation = "lighter";
+
+    // expanding wipe ring — the leading edge the sparkles ride just behind
+    const ringR = maxR * easeOutCubic(t);
+    const ringAlpha = 1 - t;
+    fxCtx.beginPath();
+    fxCtx.arc(cx, cy, ringR, 0, Math.PI * 2);
+    fxCtx.lineWidth = 6 * (1 - t) + 1;
+    fxCtx.strokeStyle = `rgba(147,197,253,${ringAlpha * 0.9})`;
+    fxCtx.shadowColor = "#3b82f6";
+    fxCtx.shadowBlur = 18;
+    fxCtx.stroke();
+
+    for (const p of particles) {
+      const pt = Math.max(0, Math.min(1, (now - start - p.delay) / duration));
+      if (pt <= 0) continue;
+      const r = p.dist * easeOutCubic(pt);
+      const x = cx + Math.cos(p.angle) * r;
+      const y = cy + Math.sin(p.angle) * r;
+      const alpha = (1 - pt) * (pt < 0.15 ? pt / 0.15 : 1);
+      if (alpha <= 0) continue;
+      const s = p.size * (0.6 + 0.4 * Math.sin((pt * 10) + p.twinkle));
+      fxCtx.beginPath();
+      fxCtx.globalAlpha = alpha;
+      fxCtx.fillStyle = p.color;
+      fxCtx.shadowColor = p.color;
+      fxCtx.shadowBlur = 6;
+      drawSpark(fxCtx, x, y, s);
+      fxCtx.fill();
+    }
+    fxCtx.restore();
+
+    if (t < 1) requestAnimationFrame(frame);
+    else fxCtx.clearRect(0, 0, W, H);
+  }
+  requestAnimationFrame(frame);
+}
+
+function runCalibration() {
   recalibrateHeading();
   document.getElementById("calibrate-overlay").classList.remove("show");
   document.getElementById("nudge-pad").classList.remove("show");
   document.getElementById("look-hint").classList.add("show");
   state.hintTimer = setTimeout(hideLookHint, 5000);
+  // The reveal only ever turns on here — this is the one moment the wall
+  // is meant to visibly "disappear," not an ambient fade-in.
+  state.revealed = true;
+  fireSparkleWipe();
 }
-document.getElementById("calibrate-btn").addEventListener("click", finishCalibration);
-document.getElementById("calibrate-skip-btn").addEventListener("click", finishCalibration);
+document.getElementById("calibrate-btn").addEventListener("click", runCalibration);
 document.getElementById("recalibrate-btn").addEventListener("click", () => {
+  // Re-aiming hides the reveal again until the next Calibrate tap, so the
+  // "wipe" fanfare always means the same thing: calibration just locked in.
+  state.revealed = false;
   document.getElementById("nudge-pad").classList.add("show");
   document.getElementById("calibrate-overlay").classList.add("show");
 });
