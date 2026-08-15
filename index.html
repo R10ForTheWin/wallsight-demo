@@ -698,6 +698,20 @@ function recalibrateHeading() {
   if (state.currentBeta !== null) state.basePitch = state.currentBeta;
   state.yawTrim = 0;
   state.pitchTrim = 0;
+  // yawFromSensor/pitchFromSensor would otherwise only recompute against
+  // the new baseline on the *next* sensor event — not guaranteed to have
+  // fired before the next rendered frame — and the *smoothed* state.yaw/
+  // pitch that actually drives the camera would separately still ease in
+  // from whatever stale angle it drifted to before calibration. Since the
+  // reveal fires in this same tap, either lag would render the wrong
+  // direction in the first visible frames. Snap everything straight to
+  // zero so the very first revealed frame is already correct.
+  state.yawFromSensor = 0;
+  state.pitchFromSensor = 0;
+  state.targetYaw = 0;
+  state.targetPitch = 0;
+  state.yaw = 0;
+  state.pitch = 0;
 }
 
 function onDeviceOrientation(e) {
