@@ -106,22 +106,6 @@
   #peephole-btn.show { display: flex; }
   #peephole-btn.active { background: rgba(47,111,237,0.35); border-color: rgba(96,150,255,0.55); }
 
-  /* ---------- Label legend: shown only while the annotation layer is on ---------- */
-  #label-legend {
-    position: fixed; top: max(60px, calc(48px + env(safe-area-inset-top))); left: 50%;
-    transform: translateX(-50%); z-index: 20;
-    display: none; align-items: center; gap: 14px;
-    background: rgba(10,16,28,0.72); border: 1px solid rgba(255,255,255,0.16);
-    backdrop-filter: blur(10px);
-    border-radius: 999px; padding: 8px 16px;
-    pointer-events: none;
-  }
-  #label-legend.show { display: flex; }
-  #label-legend .legend-item {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 11.5px; font-weight: 600; color: #e5e9f0; white-space: nowrap;
-  }
-  #label-legend .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
 
   /* ---------- Center reticle: aiming aid ---------- */
   #center-reticle {
@@ -237,52 +221,33 @@
     font-weight: 600; padding: 7px 12px; border-radius: 7px; cursor: pointer;
   }
 
-  /* ---------- Labels toggle (bottom pill, same slot the X-Ray toggle used to occupy) ---------- */
+  /* ---------- Category toggles: 4 pills, same bottom slot the X-Ray toggle used to occupy ---------- */
   #labels-wrap {
     position: fixed; left: 0; right: 0; bottom: max(22px, env(safe-area-inset-bottom));
     z-index: 20; display: none; justify-content: center; pointer-events: none;
+    padding: 0 14px;
   }
   #labels-wrap.show { display: flex; }
-  #labels-pill-btn {
+  #labels-row {
     pointer-events: auto;
-    display: flex; align-items: center; gap: 10px;
+    display: flex; flex-wrap: wrap; justify-content: center;
+    gap: 8px; max-width: 420px;
+  }
+  .label-pill {
+    display: flex; align-items: center; gap: 8px;
     background: rgba(10,16,28,0.72); border: 1px solid rgba(255,255,255,0.16);
     backdrop-filter: blur(10px);
-    border-radius: 999px; padding: 12px 22px;
-    color: #fff; font-size: 15px; font-weight: 600;
+    border-radius: 999px; padding: 10px 16px;
+    color: #cbd5e1; font-size: 13.5px; font-weight: 600;
     box-shadow: 0 6px 20px rgba(0,0,0,0.35);
   }
-  #labels-pill-btn .dot {
-    width: 10px; height: 10px; border-radius: 50%;
+  .label-pill .dot {
+    width: 9px; height: 9px; border-radius: 50%;
     background: #64748b; box-shadow: none;
     transition: background 0.2s, box-shadow 0.2s;
   }
-  #labels-pill-btn.active .dot {
-    background: #22c55e; box-shadow: 0 0 10px #22c55e;
-  }
-
-  /* ---------- Caption (replaces category legend chips) ---------- */
-  #caption-wrap {
-    position: fixed; left: 0; right: 0; bottom: max(78px, calc(66px + env(safe-area-inset-bottom))); z-index: 20;
-    padding: 10px 16px max(16px, env(safe-area-inset-bottom));
-    display: flex; justify-content: center;
-    background: linear-gradient(to top, rgba(4,8,16,0.85), rgba(4,8,16,0));
-    pointer-events: none;
-  }
-  #caption-chip {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
-    backdrop-filter: blur(8px);
-    border-radius: 999px; padding: 9px 16px; font-size: 12.5px; font-weight: 600;
-    color: #e5e9f0; white-space: nowrap;
-    opacity: 0; transform: translateY(4px);
-    transition: opacity 0.35s ease, transform 0.35s ease;
-  }
-  #caption-chip.show { opacity: 1; transform: translateY(0); }
-  #caption-chip .caption-dot {
-    width: 7px; height: 7px; border-radius: 50%; background: var(--dot, #3b82f6);
-    flex: 0 0 auto;
-  }
+  .label-pill.active { color: #fff; }
+  .label-pill.active .dot { box-shadow: 0 0 8px var(--pill-color); background: var(--pill-color); }
 
   /* ---------- Look hint ---------- */
   #look-hint {
@@ -320,12 +285,6 @@
   </div>
 </div>
 
-<!-- Legend for the stud/electrical/plumbing label layer, shown only while it's on -->
-<div id="label-legend">
-  <span class="legend-item"><span class="dot" style="background:#ffb300"></span>Studs</span>
-  <span class="legend-item"><span class="dot" style="background:#ff1744"></span>Electrical</span>
-  <span class="legend-item"><span class="dot" style="background:#00e5ff"></span>Plumbing</span>
-</div>
 
 <!-- Faint center reticle: aiming aid for the peephole and for manual trim -->
 <div id="center-reticle"></div>
@@ -374,14 +333,14 @@
   <span>Pan &amp; tilt your phone to look around</span>
 </div>
 
-<!-- Stud/electrical/plumbing labels toggle -->
+<!-- Category label toggles -->
 <div id="labels-wrap">
-  <button id="labels-pill-btn"><span class="dot"></span><span id="labels-pill-label">Show Labels</span></button>
-</div>
-
-<!-- Dynamic caption (replaces the old category legend chips) -->
-<div id="caption-wrap">
-  <div id="caption-chip"><span class="caption-dot"></span><span id="caption-text">Exploring the wall cavity…</span></div>
+  <div id="labels-row">
+    <button class="label-pill" id="pill-studs" style="--pill-color:#ffb300"><span class="dot"></span>Studs</button>
+    <button class="label-pill" id="pill-electrical" style="--pill-color:#ff1744"><span class="dot"></span>Electrical</button>
+    <button class="label-pill" id="pill-plumbing" style="--pill-color:#00e5ff"><span class="dot"></span>Plumbing</button>
+    <button class="label-pill" id="pill-hvac" style="--pill-color:#39ff14"><span class="dot"></span>HVAC</button>
+  </div>
 </div>
 
 <!-- Start / permission screen -->
@@ -420,7 +379,10 @@ import * as THREE from "three";
 const state = {
   revealed: true,
   revealFactor: 1,       // smoothed 0..1, drives the crossfade toggle transition
-  showLabels: false,     // stud/electrical/plumbing label layer toggle
+  showStuds: false,
+  showElectrical: false,
+  showPlumbing: false,
+  showHvac: false,
   orientationActive: false,
   dragActive: false,
   lastPointer: null,
@@ -437,7 +399,6 @@ const state = {
   currentBeta: null,     // latest raw device-tilt reading, degrees
   basePitch: null,       // tilt that maps to pitch 0; set on calibration (handles phone not being held perfectly upright)
   hintTimer: null,
-  activeCaptionKey: null,
 };
 
 // How opaque a directly-faced photo gets at full reveal. Soft-blend per
@@ -463,11 +424,16 @@ scene.add(wallGroup);
      front.jpg, back.jpg, left.jpg, right.jpg, ceiling.jpg, wide.jpg
    If a file is missing, a labeled placeholder texture is generated
    instead so the rig still runs end-to-end while photos are pending. */
+// Per-direction category label layers. A direction only lists the
+// categories that are actually visible in that photo (e.g. back/right have
+// no plumbing in frame, ceiling has no wall studs) — missing categories
+// just mean no toggle-able content for that direction, not an error.
+const CATEGORIES = ["studs", "electrical", "plumbing", "hvac"];
 const PHOTO_DEFS = [
-  { key: "front",   file: "front.jpg",   annot: "front-annot.png",   caption: "Front Wall — Screen & AV Rough-In", dot: "#3b82f6", dir: [0, 0, -1] },
-  { key: "back",    file: "back.jpg",    annot: "back-annot.png",    caption: "Back Wall — Entry Doors",           dot: "#a855f7", dir: [0, 0, 1] },
-  { key: "right",   file: "right.jpg",   annot: "right-annot.png",   caption: "Side Wall — Emergency Exit",        dot: "#22c55e", dir: [1, 0, 0] },
-  { key: "ceiling", file: "ceiling.jpg", annot: "ceiling-annot.png", caption: "Ceiling — HVAC & Conduit",          dot: "#38bdf8", dir: [0, 1, 0] },
+  { key: "front",   file: "front.jpg",   dir: [0, 0, -1], annots: { studs: "front-studs.png", electrical: "front-electrical.png", plumbing: "front-plumbing.png", hvac: "front-hvac.png" } },
+  { key: "back",    file: "back.jpg",    dir: [0, 0, 1],  annots: { studs: "back-studs.png", electrical: "back-electrical.png", hvac: "back-hvac.png" } },
+  { key: "right",   file: "right.jpg",   dir: [1, 0, 0],  annots: { studs: "right-studs.png", electrical: "right-electrical.png", hvac: "right-hvac.png" } },
+  { key: "ceiling", file: "ceiling.jpg", dir: [0, 1, 0],  annots: { electrical: "ceiling-electrical.png", plumbing: "ceiling-plumbing.png", hvac: "ceiling-hvac.png" } },
   // No distinct "left" photo yet — the low-opacity wide backdrop sphere
   // fills that gap as you pan left. Add a left.jpg + entry here later.
 ];
@@ -575,16 +541,16 @@ const PLANE_DISTANCE = 5;
 // re-aimed at the camera every frame), so tilting the phone away from dead-
 // center on a direction is really rotating the *view ray* off that plane's
 // face — a plane covers roughly ±atan((size/2)/distance) before its edge
-// enters frame. 9 only covered ~±42°, so combining a downward pitch with
-// the ~35° half-FOV could expose the edge (visible seam above the bottom
-// UI). 22 covers ~±66°, comfortable margin for realistic tilt.
-const PLANE_SIZE = 22;
+// enters frame. 9 only covered ~±42° and even 22 (~±66°) still showed a
+// seam on a real phone, so this is set generously large — 50 covers ~±79°,
+// comfortable margin for any realistic tilt.
+const PLANE_SIZE = 50;
 
-const photoMeshes = []; // { mesh, dir: Vector3, def }
+const photoMeshes = []; // { mesh, annotMeshes: {studs,electrical,plumbing,hvac}, dir: Vector3, def }
 
 async function buildPhotoRig() {
   for (const def of PHOTO_DEFS) {
-    const rawTex = await loadTextureWithFallback(def.file, def.caption);
+    const rawTex = await loadTextureWithFallback(def.file, def.key);
     const tex = featherTexture(rawTex);
 
     const geo = new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE);
@@ -603,30 +569,34 @@ async function buildPhotoRig() {
     mesh.renderOrder = 0;
     wallGroup.add(mesh);
 
-    // Optional stud/electrical/plumbing label layer — same plane, drawn a
-    // hair closer to camera (renderOrder) so it sits cleanly on top of the
-    // photo instead of z-fighting with it. Missing/failed-to-load annot
-    // files just mean no label layer for that direction, not an error.
-    let annotMesh = null;
-    if (def.annot) {
-      const annotTex = await tryLoadTexture(def.annot);
-      if (annotTex) {
-        const annotMat = new THREE.MeshBasicMaterial({
-          map: annotTex,
-          transparent: true,
-          opacity: 0,
-          side: THREE.DoubleSide,
-          depthWrite: false,
-        });
-        annotMesh = new THREE.Mesh(geo, annotMat);
-        annotMesh.position.copy(mesh.position);
-        annotMesh.quaternion.copy(mesh.quaternion);
-        annotMesh.renderOrder = 1;
-        wallGroup.add(annotMesh);
-      }
+    // Per-category label layers (studs/electrical/plumbing/hvac) — same
+    // plane, drawn a hair closer to camera (renderOrder) so each sits
+    // cleanly on top of the photo instead of z-fighting with it. A
+    // direction with no annot file for a category (or a failed load) just
+    // means no toggle-able content there, not an error.
+    const annotMeshes = {};
+    for (const cat of CATEGORIES) {
+      const file = def.annots[cat];
+      annotMeshes[cat] = null;
+      if (!file) continue;
+      const annotTex = await tryLoadTexture(file);
+      if (!annotTex) continue;
+      const annotMat = new THREE.MeshBasicMaterial({
+        map: annotTex,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const annotMesh = new THREE.Mesh(geo, annotMat);
+      annotMesh.position.copy(mesh.position);
+      annotMesh.quaternion.copy(mesh.quaternion);
+      annotMesh.renderOrder = 1;
+      wallGroup.add(annotMesh);
+      annotMeshes[cat] = annotMesh;
     }
 
-    photoMeshes.push({ mesh, annotMesh, dir, def });
+    photoMeshes.push({ mesh, annotMeshes, dir, def });
   }
 
   // Wide establishing shot as a low-opacity backdrop sphere, filling gaps
@@ -685,7 +655,6 @@ async function buildRig() {
   if (panoTex) {
     usingPano = true;
     panoSphereRef = buildPanoSphere(panoTex);
-    document.getElementById("caption-wrap").style.display = "none";
     return;
   }
   const rig = await buildPhotoRig();
@@ -813,16 +782,20 @@ peepholeBtn.addEventListener("click", () => {
   applyPeepholeMode();
 });
 
-/* ---------------- Stud/electrical/plumbing label layer ---------------- */
-const labelsPillBtn = document.getElementById("labels-pill-btn");
-const labelsPillLabel = document.getElementById("labels-pill-label");
-const labelLegend = document.getElementById("label-legend");
-labelsPillBtn.addEventListener("click", () => {
-  state.showLabels = !state.showLabels;
-  labelsPillBtn.classList.toggle("active", state.showLabels);
-  labelsPillLabel.textContent = state.showLabels ? "Hide Labels" : "Show Labels";
-  labelLegend.classList.toggle("show", state.showLabels);
-});
+/* ---------------- Category label toggles (studs/electrical/plumbing/hvac) ---------------- */
+const LABEL_PILLS = [
+  { id: "pill-studs", stateKey: "showStuds" },
+  { id: "pill-electrical", stateKey: "showElectrical" },
+  { id: "pill-plumbing", stateKey: "showPlumbing" },
+  { id: "pill-hvac", stateKey: "showHvac" },
+];
+for (const { id, stateKey } of LABEL_PILLS) {
+  const btn = document.getElementById(id);
+  btn.addEventListener("click", () => {
+    state[stateKey] = !state[stateKey];
+    btn.classList.toggle("active", state[stateKey]);
+  });
+}
 
 function hideLookHint() {
   document.getElementById("look-hint").classList.remove("show");
@@ -939,17 +912,7 @@ document.getElementById("motion-retry-btn").addEventListener("click", async () =
   }
 });
 
-/* ---------------- Caption chip ---------------- */
-const captionChip = document.getElementById("caption-chip");
-const captionText = document.getElementById("caption-text");
 const centerReticle = document.getElementById("center-reticle");
-
-function setCaption(key, label, dotColor) {
-  if (key === state.activeCaptionKey) return;
-  state.activeCaptionKey = key;
-  captionText.textContent = label;
-  captionChip.style.setProperty("--dot", dotColor);
-}
 
 /* ---------------- Resize ---------------- */
 window.addEventListener("resize", () => {
@@ -994,25 +957,25 @@ function animate() {
   } else {
     camera.getWorldDirection(forward);
 
-    let bestKey = null, bestWeight = -1, bestDef = null;
-    for (const { mesh, annotMesh, dir, def } of photoMeshes) {
+    const categoryOn = {
+      studs: state.showStuds,
+      electrical: state.showElectrical,
+      plumbing: state.showPlumbing,
+      hvac: state.showHvac,
+    };
+    for (const { mesh, annotMeshes, dir } of photoMeshes) {
       const dot = Math.max(0, forward.dot(dir));
       const weight = Math.pow(dot, peepholeMode ? 1 : WEIGHT_POWER);
       mesh.material.opacity = weight * activeBlend * state.revealFactor;
-      if (annotMesh) {
-        annotMesh.material.opacity = state.showLabels ? weight * activeBlend * state.revealFactor : 0;
+      for (const cat of CATEGORIES) {
+        const annotMesh = annotMeshes[cat];
+        if (annotMesh) {
+          annotMesh.material.opacity = categoryOn[cat] ? weight * activeBlend * state.revealFactor : 0;
+        }
       }
-      if (weight > bestWeight) { bestWeight = weight; bestKey = def.key; bestDef = def; }
     }
     if (wideSphereRef) {
       wideSphereRef.material.opacity = (peepholeMode ? WIDE_BLEND_OPACITY + (1 - WIDE_BLEND_OPACITY) * 0.5 : WIDE_BLEND_OPACITY) * state.revealFactor;
-    }
-
-    if (bestDef && bestWeight > 0.3) {
-      setCaption(bestKey, bestDef.caption, bestDef.dot);
-      captionChip.classList.toggle("show", state.revealFactor > 0.05);
-    } else {
-      captionChip.classList.remove("show");
     }
   }
 
