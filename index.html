@@ -128,31 +128,6 @@
   #center-reticle::before { left: 8px; top: 0; width: 2px; height: 18px; }
   #center-reticle::after { left: 0; top: 8px; width: 18px; height: 2px; }
 
-  /* ---------- Nudge pad: fine yaw/pitch trim ---------- */
-  #nudge-pad {
-    /* Only ever shown during calibration, over #calibrate-overlay — anchored
-       top-left, below the header, since the calibrate-card is bottom-
-       anchored at nearly full width and was completely covering the old
-       bottom-left position (same z-index stack, opaque card on top). */
-    position: fixed; left: 14px; top: max(70px, calc(58px + env(safe-area-inset-top)));
-    z-index: 41; display: none;
-    grid-template-columns: 30px 30px 30px;
-    grid-template-rows: 30px 30px 30px;
-    gap: 3px;
-  }
-  #nudge-pad.show { display: grid; }
-  .nudge-btn {
-    background: rgba(10,16,28,0.68); border: 1px solid rgba(255,255,255,0.16);
-    backdrop-filter: blur(8px); color: #cbd5e1; font-size: 11px;
-    border-radius: 7px; display: flex; align-items: center; justify-content: center;
-    cursor: pointer; padding: 0; user-select: none;
-  }
-  .nudge-btn:active { background: rgba(47,111,237,0.4); color: #fff; }
-  .nudge-up { grid-column: 2; grid-row: 1; }
-  .nudge-left { grid-column: 1; grid-row: 2; }
-  .nudge-reset { grid-column: 2; grid-row: 2; font-size: 16px; color: #64748b; }
-  .nudge-right { grid-column: 3; grid-row: 2; }
-  .nudge-down { grid-column: 2; grid-row: 3; }
 
   /* ---------- Calibration overlay ---------- */
   #calibrate-overlay {
@@ -160,6 +135,12 @@
     display: none; align-items: flex-end; justify-content: center;
     background: rgba(4,8,16,0.35);
     padding: 0 16px max(24px, env(safe-area-inset-bottom));
+    /* Was silently swallowing touches meant for the canvas underneath —
+       finger-drag-to-adjust looked broken during calibration because this
+       full-screen div was intercepting every touch before it got there.
+       Let touches pass through to the canvas; only the card itself (which
+       explicitly re-enables pointer-events below) needs to stay tappable. */
+    pointer-events: none;
   }
   #calibrate-overlay.show { display: flex; }
 
@@ -193,6 +174,7 @@
     backdrop-filter: blur(14px);
     border-radius: 18px; padding: 22px 22px 18px; text-align: center;
     box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+    pointer-events: auto;
   }
   #calibrate-card .icon { font-size: 30px; margin-bottom: 8px; }
   #calibrate-card h2 { font-size: 17px; margin: 0 0 8px; font-weight: 700; }
@@ -312,14 +294,6 @@
 <div id="center-reticle"></div>
 <div id="peephole-ring"></div>
 
-<!-- Nudge pad: fine yaw/pitch trim on top of sensor calibration -->
-<div id="nudge-pad">
-  <button id="nudge-up" class="nudge-btn nudge-up" title="Nudge up">▲</button>
-  <button id="nudge-left" class="nudge-btn nudge-left" title="Nudge left">◀</button>
-  <button id="nudge-reset" class="nudge-btn nudge-reset" title="Reset trim">•</button>
-  <button id="nudge-right" class="nudge-btn nudge-right" title="Nudge right">▶</button>
-  <button id="nudge-down" class="nudge-btn nudge-down" title="Nudge down">▼</button>
-</div>
 
 <!-- Calibration overlay: aligns the panorama's "front" to a real wall in the room -->
 <div id="calibrate-overlay">
@@ -419,7 +393,7 @@ const state = {
   targetPitch: 0,
   yawFromSensor: 0,      // raw calibrated yaw from the compass, before manual trim
   pitchFromSensor: 0,    // raw calibrated pitch from gravity, before manual trim
-  yawTrim: 0,            // manual fine-alignment offset (drag or nudge pad), on top of the sensor
+  yawTrim: 0,            // manual fine-alignment offset (drag), on top of the sensor
   pitchTrim: 0,          // same, for pitch — persists across recalibration is reset on purpose
   currentHeading: null,  // latest raw compass heading, degrees, 0-360
   baseHeading: null,     // heading that maps to yaw 0; set on calibration
@@ -847,36 +821,6 @@ function setupDragFallback() {
 }
 setupDragFallback();
 
-/* ---------------- Nudge pad: small precise taps for fine alignment ---------------- */
-const NUDGE_STEP = 1.2 * DEG2RAD;
-function nudge(dYaw, dPitch) {
-  state.yawTrim += dYaw;
-  state.pitchTrim += dPitch;
-}
-function wireNudgeButton(id, dYaw, dPitch) {
-  const btn = document.getElementById(id);
-  let repeatTimer = null;
-  const fire = () => nudge(dYaw, dPitch);
-  const startRepeat = (ev) => {
-    ev.preventDefault();
-    fire();
-    repeatTimer = setInterval(fire, 110);
-  };
-  const stopRepeat = () => { clearInterval(repeatTimer); repeatTimer = null; };
-  btn.addEventListener("pointerdown", startRepeat);
-  btn.addEventListener("pointerup", stopRepeat);
-  btn.addEventListener("pointerleave", stopRepeat);
-  btn.addEventListener("pointercancel", stopRepeat);
-}
-wireNudgeButton("nudge-left", -NUDGE_STEP, 0);
-wireNudgeButton("nudge-right", NUDGE_STEP, 0);
-wireNudgeButton("nudge-up", 0, -NUDGE_STEP);
-wireNudgeButton("nudge-down", 0, NUDGE_STEP);
-document.getElementById("nudge-reset").addEventListener("click", () => {
-  state.yawTrim = 0;
-  state.pitchTrim = 0;
-});
-
 /* ---------------- Peephole reveal mode ---------------- */
 let peepholeMode = true;
 const peepholeBtn = document.getElementById("peephole-btn");
@@ -975,17 +919,10 @@ startBtn.addEventListener("click", async () => {
     document.getElementById("peephole-btn").classList.add("show");
     document.getElementById("labels-wrap").classList.add("show");
 
-    if (motionStatus === "granted") {
-      // Let the calibration screen sit over the live camera feed so the
-      // presenter can actually see the real wall while aiming the phone.
-      // Nudge pad only needs to be visible for this fine-aim step, not
-      // for the rest of the session — see runCalibration().
-    }
     // The X-ray reveal stays off (state.revealed starts false) until the
     // presenter explicitly taps Calibrate, even without a compass — that
     // tap is what fires the reveal, recalibrateHeading() just safely
     // no-ops if there's no sensor reading yet to lock a baseline from.
-    document.getElementById("nudge-pad").classList.add("show");
     document.getElementById("calibrate-overlay").classList.add("show");
   } catch (err) {
     startError.style.display = "block";
@@ -1168,8 +1105,8 @@ function fireSparkleWipe() {
 // heading this close to a wall this full of steel studs/conduit (the whole
 // subject of the demo deflects its own calibration target) — so instead of
 // trusting one compass reading blind, "Calibrate" gets you close and then
-// hands control to the nudge pad for a quick visual confirm before it
-// commits. Re-callable via the recalibrate icon, same two phases each time.
+// hands control to a drag-to-adjust confirm step before it commits.
+// Re-callable via the recalibrate icon, same two phases each time.
 let calibrationPhase = "initial"; // "initial" | "confirming"
 const calibrateBtn = document.getElementById("calibrate-btn");
 const calibrateCardText = document.getElementById("calibrate-card-text");
@@ -1193,7 +1130,7 @@ function runCalibration() {
     // against the bullseye/real whiteboard, instead of committing blind.
     state.revealed = true;
     calibrationPhase = "confirming";
-    calibrateCardText.textContent = "Use the arrows to nudge the pink target until it lands inside the outline above — then tap Looks Good.";
+    calibrateCardText.textContent = "Drag anywhere to swipe the pink target until it lands inside the outline above — then tap Looks Good.";
     calibrateBtn.textContent = "Looks Good";
     calibrateBtn.disabled = false;
   }, 500);
@@ -1201,7 +1138,6 @@ function runCalibration() {
 
 function confirmCalibration() {
   document.getElementById("calibrate-overlay").classList.remove("show");
-  document.getElementById("nudge-pad").classList.remove("show");
   document.getElementById("look-hint").classList.add("show");
   state.hintTimer = setTimeout(hideLookHint, 5000);
   // The fanfare is saved for this final commit — the moment the presenter
@@ -1221,7 +1157,6 @@ document.getElementById("recalibrate-btn").addEventListener("click", () => {
   calibrationPhase = "initial";
   calibrateBtn.textContent = "Calibrate";
   calibrateCardText.textContent = "Point at the center of the whiteboard on the front wall, then tap Calibrate.";
-  document.getElementById("nudge-pad").classList.add("show");
   document.getElementById("calibrate-overlay").classList.add("show");
 });
 
@@ -1257,7 +1192,7 @@ function animate() {
   requestAnimationFrame(animate);
 
   // Sensor reading + manual trim are combined fresh every frame, so a drag
-  // or nudge-pad tap applies identically whether or not the gyro is active.
+  // applies identically whether or not the compass is behaving.
   state.targetYaw = state.yawFromSensor + state.yawTrim;
   state.targetPitch = THREE.MathUtils.clamp(state.pitchFromSensor + state.pitchTrim, -1.3, 1.3);
 
