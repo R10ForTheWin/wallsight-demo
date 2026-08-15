@@ -410,12 +410,12 @@ const state = {
   pitch: 0,
   targetYaw: 0,
   targetPitch: 0,
-  yawFromSensor: 0,      // raw calibrated yaw from gamma tilt, before manual trim
+  yawFromSensor: 0,      // raw calibrated yaw from the compass, before manual trim
   pitchFromSensor: 0,    // raw calibrated pitch from gravity, before manual trim
   yawTrim: 0,            // manual fine-alignment offset (drag or nudge pad), on top of the sensor
   pitchTrim: 0,          // same, for pitch — persists across recalibration is reset on purpose
-  currentGamma: null,    // latest raw left-right tilt reading, degrees (gravity-based, not compass)
-  baseGamma: null,       // gamma that maps to yaw 0; set on calibration
+  currentHeading: null,  // latest raw compass heading, degrees, 0-360
+  baseHeading: null,     // heading that maps to yaw 0; set on calibration
   currentBeta: null,     // latest raw device-tilt reading, degrees
   basePitch: null,       // tilt that maps to pitch 0; set on calibration (handles phone not being held perfectly upright)
   hintTimer: null,
@@ -685,29 +685,34 @@ const rigReady = buildRig();
 /* ---------------- Interaction: device orientation + drag fallback ---------------- */
 const DEG2RAD = Math.PI / 180;
 
-// Yaw used to come from webkitCompassHeading/alpha (magnetometer-based
-// compass), but this room is full of exposed steel studs and conduit —
-// exactly what deflects a phone compass, consistently, not just as noise.
-// That's why pitch (gravity-based: e.beta) always tracked correctly while
-// yaw didn't, no matter how the timing/smoothing was tuned. Fix: derive
-// yaw from e.gamma instead. When the phone is held upright like a
-// viewfinder (not flat), gamma — the same gravity+gyro sensor family that
-// already makes beta/pitch reliable — tracks left-right pan directly,
-// with no magnetometer involved. Trade-off: gamma only spans ±90°, so
-// panning all the way around to "back" may run out of range; dragging
-// still works as a fallback for that.
+// Tried deriving yaw from e.gamma instead of compass heading, to sidestep
+// magnetic interference from this room's steel framing — reverted. Raw
+// gamma is part of an Euler-angle triple that hits gimbal-lock-adjacent
+// instability as beta (pitch) swings toward vertical, which is exactly
+// what panning up toward the ceiling content does — confirmed on-device as
+// erratic jumping, worse than the compass drift it was meant to fix. Back
+// to webkitCompassHeading/alpha; the interference problem is real but
+// needs a properly-fused fix (or marker tracking, deferred to v2.0), not a
+// single raw axis swapped in.
+function getHeading(e) {
+  if (typeof e.webkitCompassHeading === "number" && !isNaN(e.webkitCompassHeading)) {
+    return e.webkitCompassHeading;
+  }
+  if (e.alpha !== null) return (360 - e.alpha) % 360;
+  return null;
+}
 
 function normalizeAngle180(deg) {
   return ((deg + 180) % 360 + 360) % 360 - 180;
 }
 
-// Locks whatever gamma + tilt the phone is facing right now as yaw/pitch-0
+// Locks whatever heading + tilt the phone is facing right now as yaw/pitch-0
 // (the pano's "front"). Called by the Calibrate button and the recalibrate
 // icon — re-callable anytime, not just once at page load. Also clears
 // manual trim, since a fresh calibration supersedes any nudging done
 // against the old baseline.
 function recalibrateHeading() {
-  if (state.currentGamma !== null) state.baseGamma = state.currentGamma;
+  if (state.currentHeading !== null) state.baseHeading = state.currentHeading;
   if (state.currentBeta !== null) state.basePitch = state.currentBeta;
   state.yawTrim = 0;
   state.pitchTrim = 0;
@@ -728,17 +733,16 @@ function recalibrateHeading() {
 }
 
 function onDeviceOrientation(e) {
-  if (e.gamma === null && e.beta === null) return;
+  const heading = getHeading(e);
+  if (heading === null && e.beta === null) return;
   state.orientationActive = true;
   hideLookHint();
 
-  if (e.gamma !== null) {
-    state.currentGamma = e.gamma;
-    if (state.baseGamma === null) state.baseGamma = e.gamma; // auto-baseline until explicitly (re)calibrated
-    const relGamma = normalizeAngle180(e.gamma - state.baseGamma);
-    // Confirmed inverted on-device (panning left moved the image right) —
-    // gamma's sign convention isn't the same as compass heading's was.
-    state.yawFromSensor = relGamma * DEG2RAD;
+  if (heading !== null) {
+    state.currentHeading = heading;
+    if (state.baseHeading === null) state.baseHeading = heading; // auto-baseline until explicitly (re)calibrated
+    const relHeading = normalizeAngle180(heading - state.baseHeading);
+    state.yawFromSensor = -relHeading * DEG2RAD;
   }
 
   // Relative to basePitch rather than an assumed-vertical 90°, so pitch
