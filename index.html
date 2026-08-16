@@ -144,29 +144,21 @@
   }
   #calibrate-overlay.show { display: flex; }
 
-  /* Whiteboard-shaped aiming guide: shown centered over the live camera
-     feed while calibrating, so the presenter can visually line the phone
-     up with the actual whiteboard before locking it in as "straight ahead". */
+  /* Fixed aiming bullseye: shown at true screen-center over the live camera
+     feed while calibrating. The presenter keeps the phone physically aimed
+     so this sits on the real whiteboard; the 3D pink bullseye (which moves
+     with drag) is the thing that gets aligned onto it — two concentric
+     targets merging into one reads unambiguously as "line these up",
+     unlike the old dashed-rectangle framing this replaced. True center
+     (not an offset position) since the 3D marker also always renders at
+     true screen center — no residual gap between the two. */
   #calib-target {
-    position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%);
-    /* Matched to the actual whiteboard's proportions (~4:3), measured off a
-       reference photo of the room from a typical seat, not a generic
-       "wide screen" guess. 46% (not the true optical-center 50%) leaves
-       clearance for the card below — the 3D alignment marker always
-       renders at true screen center, so this residual few-percent gap is
-       a known, small, deliberate trade-off, not a bug. */
-    width: min(64vw, 380px); aspect-ratio: 4 / 3;
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: min(46vw, 260px); aspect-ratio: 1 / 1;
     pointer-events: none;
   }
-  #calib-target .frame {
-    position: absolute; inset: 0;
-    border: 3px dashed rgba(255,255,255,0.85);
-    border-radius: 8px;
-    box-shadow: 0 0 0 1px rgba(4,8,16,0.4);
-  }
   #calib-target .bullseye {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
-    width: 15%; aspect-ratio: 1 / 1;
+    position: absolute; inset: 0; width: 100%; height: 100%;
   }
   #calibrate-card {
     width: 100%; max-width: 380px;
@@ -314,7 +306,6 @@
 <!-- Calibration overlay: aligns the panorama's "front" to a real wall in the room -->
 <div id="calibrate-overlay">
   <div id="calib-target">
-    <div class="frame"></div>
     <svg class="bullseye" viewBox="0 0 100 100" fill="none">
       <circle cx="50" cy="50" r="42" stroke="#3b82f6" stroke-width="4"/>
       <circle cx="50" cy="50" r="24" stroke="#3b82f6" stroke-width="4"/>
@@ -324,7 +315,7 @@
   <div id="calibrate-card">
     <div class="icon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></div>
     <h2>Calibrate Direction</h2>
-    <p id="calibrate-card-text">Point at the center of the whiteboard on the front wall, then tap Calibrate.</p>
+    <p id="calibrate-card-text">Hold your phone still, aimed at the center of the whiteboard on the front wall — then tap Calibrate.</p>
     <button id="calibrate-btn">Calibrate</button>
   </div>
 </div>
@@ -500,33 +491,28 @@ function makePlaceholderTexture(label) {
   return tex;
 }
 
-/* Bold crosshair + rectangle target, shown in place of the front photo only
-   while confirming calibration (see calibrationPhase) — mirrors the fixed
-   HTML #calib-target bullseye's shape exactly, so "nudge this marker until
-   it sits inside that outline" is an unambiguous visual match instead of
-   trying to judge alignment against a muted construction photo. */
+/* Pink bullseye shown fixed at camera-forward only while confirming
+   calibration (see calibrationPhase) — same concentric-ring proportions
+   (r=42/24/5 out of a 100-wide box) as the fixed HTML #calib-target
+   bullseye, so "drag the pink bullseye onto the blue one" is a literal,
+   unambiguous visual match: at correct alignment the two rings coincide
+   exactly, not just "somewhere inside an outline". */
 function makeAlignmentMarkerTexture() {
-  const W = 1024, H = 768;
+  const W = 800; // square, matching #calib-target's 1:1 aspect
   const cvs = document.createElement("canvas");
-  cvs.width = W; cvs.height = H;
+  cvs.width = W; cvs.height = W;
   const ctx = cvs.getContext("2d");
-  const cx = W / 2, cy = H / 2;
+  const cx = W / 2, cy = W / 2;
   const color = "#ff2ecc";
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.shadowColor = color;
   ctx.shadowBlur = 24;
 
-  // rectangle, same 4:3 shape as #calib-target
-  const rw = W * 0.66, rh = rw * 0.75;
-  ctx.lineWidth = 10;
-  ctx.strokeRect(cx - rw / 2, cy - rh / 2, rw, rh);
-
-  // bullseye, same proportions as the HTML version
   ctx.lineWidth = 9;
-  ctx.beginPath(); ctx.arc(cx, cy, rw * 0.21, 0, Math.PI * 2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(cx, cy, rw * 0.12, 0, Math.PI * 2); ctx.stroke();
-  ctx.beginPath(); ctx.arc(cx, cy, rw * 0.025, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, W * 0.42, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, W * 0.24, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.arc(cx, cy, W * 0.05, 0, Math.PI * 2); ctx.fill();
 
   const tex = new THREE.CanvasTexture(cvs);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -534,17 +520,18 @@ function makeAlignmentMarkerTexture() {
 }
 
 /* ---------------- Calibration alignment marker ---------------- */
-// Bold crosshair + rectangle target shown fixed at camera-forward (world
-// -Z, matching the camera's yaw=0/pitch=0 orientation right after a
-// calibration reset) only while confirming calibration — see
-// calibrationPhase. Independent of the pano sphere itself, so it lines up
-// with the fixed HTML #calib-target regardless of what the pano shows there.
+// Pink bullseye shown fixed at camera-forward (world -Z, matching the
+// camera's yaw=0/pitch=0 orientation right after a calibration reset) only
+// while confirming calibration — see calibrationPhase. Independent of the
+// pano sphere itself, so it lines up with the fixed HTML #calib-target
+// regardless of what the pano shows there.
 const MARKER_DISTANCE = 5;
-// Sized so the rectangle (66% of its texture width) subtends about the same
-// on-screen width as the fixed HTML #calib-target (~64% of screen width)
-// when centered, at MARKER_DISTANCE with a 70° FOV.
+// Sized so the marker plane subtends the same on-screen width as the fixed
+// HTML #calib-target box (46% of screen width) when centered, at
+// MARKER_DISTANCE with a 70° FOV — so rings drawn at matching proportions
+// inside each box land at matching on-screen sizes.
 const visibleWidthAtDistance = 2 * MARKER_DISTANCE * Math.tan(35 * Math.PI / 180);
-const MARKER_PLANE_SIZE = (0.64 * visibleWidthAtDistance) / 0.66;
+const MARKER_PLANE_SIZE = 0.46 * visibleWidthAtDistance;
 
 let alignmentMarkerMesh = null;
 
@@ -564,6 +551,26 @@ function buildAlignmentMarker() {
   return mesh;
 }
 
+// three.js's default SphereGeometry UV mapping puts camera-forward
+// (yaw=0, world -Z) at u=0.75 of the texture, not u=0.5 — see the vertex
+// formula: x=-r*cos(u*2π)*sin(v_theta), z=r*sin(u*2π)*sin(v_theta), which
+// only hits world -Z at u=0.75. Measured directly in pano.jpg — an
+// automated scan for the widest, brightest neutral-white band in the
+// wall-height strip (the whiteboard is clearly bigger/more solid than the
+// two side projector screens) found u=0.595; manually marking the
+// whiteboard's visual center independently found u=0.588. The two agree
+// to within 1%, so the whiteboard's true center is ~u=0.59, not 0.5 either.
+// Without correction, calibrating on the real whiteboard would ghost-
+// overlay content from ~57° away during the confirm-drag step — the pink/
+// blue bullseye alignment would still end up mathematically correct (the
+// drag redefines "forward" to wherever you point, regardless of texture
+// content), but the background you're looking at while dragging would be
+// nonsense instead of visibly settling onto the real wall. This rotates
+// the whole pano so u=0.595 (the whiteboard) lands at yaw=0 by default —
+// the drag step still exists to mop up whatever's left (compass error,
+// this offset being approximate), it just starts much closer.
+const PANO_YAW_OFFSET = (0.59 - 0.75 + 1) % 1;
+
 /* ---------------- Build the real equirectangular pano sphere(s) ---------------- */
 // Category layers render at a hair larger radius + higher renderOrder than
 // the base pano, purely to avoid z-fighting — not a visible size difference
@@ -575,6 +582,10 @@ function buildPanoSphere(tex, radius, renderOrder) {
   // matters a lot for a real room capture — text/exits would read backwards).
   const geo = new THREE.SphereGeometry(radius, 64, 40);
   geo.scale(-1, 1, 1);
+  // RepeatWrapping (not the default ClampToEdge) so the offset below wraps
+  // cleanly across the seam instead of smearing the edge pixel.
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.offset.x = PANO_YAW_OFFSET;
   const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false });
   const mesh = new THREE.Mesh(geo, mat);
   mesh.renderOrder = renderOrder;
@@ -1028,7 +1039,7 @@ function runCalibration() {
     // against the bullseye/real whiteboard, instead of committing blind.
     state.revealed = true;
     calibrationPhase = "confirming";
-    calibrateCardText.textContent = "Drag anywhere to swipe the pink target until it lands inside the outline above — then tap Looks Good.";
+    calibrateCardText.textContent = "Keep holding the phone still on the whiteboard — don't re-aim it. Drag anywhere on screen to slide the pink bullseye onto the blue one, then tap Looks Good.";
     calibrateBtn.textContent = "Looks Good";
     calibrateBtn.disabled = false;
     // Collapse to a small button-only pill now — the full card (icon,
@@ -1054,7 +1065,7 @@ function confirmCalibration() {
   });
   calibrationPhase = "initial";
   calibrateBtn.textContent = "Calibrate";
-  calibrateCardText.textContent = "Point at the center of the whiteboard on the front wall, then tap Calibrate.";
+  calibrateCardText.textContent = "Hold your phone still, aimed at the center of the whiteboard on the front wall — then tap Calibrate.";
   calibrateCard.classList.remove("compact");
 }
 
@@ -1066,7 +1077,7 @@ document.getElementById("recalibrate-btn").addEventListener("click", () => {
   state.revealed = false;
   calibrationPhase = "initial";
   calibrateBtn.textContent = "Calibrate";
-  calibrateCardText.textContent = "Point at the center of the whiteboard on the front wall, then tap Calibrate.";
+  calibrateCardText.textContent = "Hold your phone still, aimed at the center of the whiteboard on the front wall — then tap Calibrate.";
   calibrateCard.classList.remove("compact");
   document.getElementById("labels-wrap").classList.remove("show");
   document.getElementById("calibrate-overlay").classList.add("show");
