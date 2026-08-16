@@ -177,16 +177,20 @@
     pointer-events: auto;
     transition: max-width 0.2s ease, padding 0.2s ease;
   }
-  /* While actively dragging to confirm, the full card (icon/heading/copy)
-     just eats screen space needed to actually see the alignment — collapse
-     to a snug pill around the button alone. */
+  /* While actively dragging to confirm, the icon/heading just eat screen
+     space needed to actually see the alignment — collapse those, but the
+     instruction paragraph has to stay: it's the only place "drag to align"
+     is explained, and hiding it left users with a bare button and no idea
+     what to do with their finger. */
   #calibrate-card.compact {
-    max-width: 220px; padding: 10px;
+    max-width: 300px; padding: 12px 16px;
   }
   #calibrate-card.compact .icon,
-  #calibrate-card.compact h2,
-  #calibrate-card.compact p {
+  #calibrate-card.compact h2 {
     display: none;
+  }
+  #calibrate-card.compact p {
+    font-size: 12.5px; margin: 0 0 10px;
   }
   #calibrate-card .icon { font-size: 30px; margin-bottom: 8px; }
   #calibrate-card h2 { font-size: 17px; margin: 0 0 8px; font-weight: 700; }
@@ -237,7 +241,7 @@
     font-weight: 600; padding: 7px 12px; border-radius: 7px; cursor: pointer;
   }
 
-  /* ---------- Category toggles: 4 pills, same bottom slot the X-Ray toggle used to occupy ---------- */
+  /* ---------- Category toggles: 4 pills, layered on the same pano sphere ---------- */
   #labels-wrap {
     position: fixed; left: 0; right: 0; bottom: max(22px, env(safe-area-inset-bottom));
     z-index: 20; display: none; justify-content: center; pointer-events: none;
@@ -346,7 +350,7 @@
   <span>Pan &amp; tilt your phone to look around</span>
 </div>
 
-<!-- Category label toggles -->
+<!-- Category label toggles: layers on the same pano sphere -->
 <div id="labels-wrap">
   <div id="labels-row">
     <button class="label-pill" id="pill-studs" style="--pill-color:#ffb300"><span class="dot"></span>Studs</button>
@@ -376,17 +380,13 @@
 import * as THREE from "three";
 
 /* ============================================================
-   WallSight AR Demo — photo-based reveal layer
+   WallSight AR Demo — single equirectangular pano reveal layer
    - Live camera feed as page background
-   - 5 direction-mapped construction photos (front/back/left/
-     right/ceiling) plus a low-opacity "wide" backdrop sphere
-     for continuity between them, arranged around a fixed
-     virtual camera at the origin.
+   - One real 360° equirectangular capture (pano.jpg) mapped onto
+     a sphere around a fixed virtual camera at the origin — real
+     room geometry, no per-direction guessing or seams.
    - Device orientation (with drag fallback) rotates the virtual
-     camera; each photo's opacity is weighted by how directly
-     the camera is facing it, producing a smooth crossfade as
-     you pan rather than hard image-swap seams.
-   - Purely synthetic placement — not tied to real room geometry.
+     camera to look around that sphere.
    ============================================================ */
 
 const state = {
@@ -414,10 +414,9 @@ const state = {
   hintTimer: null,
 };
 
-// How opaque a directly-faced photo gets at full reveal. Soft-blend per
-// user preference: camera feed still ghosts through rather than a hard cut.
+// How opaque the pano gets at full reveal. Soft-blend per user preference:
+// camera feed still ghosts through rather than a hard cut.
 const BLEND_OPACITY = 0.86;
-const WIDE_BLEND_OPACITY = 0.4; // backdrop layer stays subtler than direction photos
 
 /* ---------------- Renderer / Scene / Camera ---------------- */
 const canvas = document.getElementById("three-canvas");
@@ -432,32 +431,22 @@ camera.position.set(0, 0, 0);
 const wallGroup = new THREE.Group();
 scene.add(wallGroup);
 
-/* ---------------- Photo asset loading (with placeholder fallback) ---------------- */
-/* Real photos go in the same folder as this file:
-     front.jpg, back.jpg, left.jpg, right.jpg, ceiling.jpg, wide.jpg
-   If a file is missing, a labeled placeholder texture is generated
-   instead so the rig still runs end-to-end while photos are pending. */
-// Per-direction category label layers. A direction only lists the
-// categories that are actually visible in that photo (e.g. back/right have
-// no plumbing in frame, ceiling has no wall studs) — missing categories
-// just mean no toggle-able content for that direction, not an error.
-const CATEGORIES = ["studs", "electrical", "plumbing", "hvac"];
-const PHOTO_DEFS = [
-  { key: "front",   file: "front.jpg",   dir: [0, 0, -1], annots: { studs: "front-studs.png", electrical: "front-electrical.png", plumbing: "front-plumbing.png", hvac: "front-hvac.png" } },
-  { key: "back",    file: "back.jpg",    dir: [0, 0, 1],  annots: { studs: "back-studs.png", electrical: "back-electrical.png", hvac: "back-hvac.png" } },
-  { key: "right",   file: "right.jpg",   dir: [1, 0, 0],  annots: { studs: "right-studs.png", electrical: "right-electrical.png", hvac: "right-hvac.png" } },
-  { key: "ceiling", file: "ceiling.jpg", dir: [0, 1, 0],  annots: { electrical: "ceiling-electrical.png", plumbing: "ceiling-plumbing.png", hvac: "ceiling-hvac.png" } },
-  // No distinct "left" photo yet — the low-opacity wide backdrop sphere
-  // fills that gap as you pan left. Add a left.jpg + entry here later.
-];
-const WIDE_DEF = { key: "wide", file: "wide.jpg" };
-
-// A real 360° equirectangular capture (see capture guide) goes here. When
-// present, it replaces the whole direction-photo rig below with a single
-// continuous sphere — no seams, no rough direction-guessing. Its absence
-// is NOT treated as a missing asset; it just means "not captured yet,"
-// so the legacy multi-photo demo rig keeps running underneath it.
+/* ---------------- Pano asset loading (with placeholder fallback) ---------------- */
+/* pano.jpg goes in the same folder as this file: a single real 360°
+   equirectangular capture of the room (2:1 aspect). If it's missing, a
+   labeled placeholder texture is generated instead so the rig still runs
+   end-to-end while the photo is pending. */
 const PANO_FILE = "pano.jpg";
+
+// Category layers: additional equirect images, same 2:1 framing as
+// pano.jpg (same camera position/orientation), each showing just that
+// category revealed (studs, electrical, etc). Laid over the base pano as
+// their own spheres, toggled by the pills. A missing category file just
+// means no toggle-able content for it yet — not an error, no banner entry
+// (mirrors how the old per-direction annots handled gaps).
+const CATEGORIES = ["studs", "electrical", "plumbing", "hvac"];
+const CATEGORY_STATE_KEY = { studs: "showStuds", electrical: "showElectrical", plumbing: "showPlumbing", hvac: "showHvac" };
+const CATEGORY_FILES = { studs: "pano-studs.png", electrical: "pano-electrical.png", plumbing: "pano-plumbing.png", hvac: "pano-hvac.png" };
 
 const loader = new THREE.TextureLoader();
 const missingAssets = [];
@@ -544,195 +533,82 @@ function makeAlignmentMarkerTexture() {
   return tex;
 }
 
-/* Bakes a soft radial alpha feather into a copy of the loaded texture so
-   each photo's edges dissolve into the surrounding camera feed / backdrop
-   instead of showing a hard rectangular seam. */
-function featherTexture(sourceTex) {
-  const W = 1024, H = 768;
-  const cvs = document.createElement("canvas");
-  cvs.width = W; cvs.height = H;
-  const ctx = cvs.getContext("2d");
+/* ---------------- Calibration alignment marker ---------------- */
+// Bold crosshair + rectangle target shown fixed at camera-forward (world
+// -Z, matching the camera's yaw=0/pitch=0 orientation right after a
+// calibration reset) only while confirming calibration — see
+// calibrationPhase. Independent of the pano sphere itself, so it lines up
+// with the fixed HTML #calib-target regardless of what the pano shows there.
+const MARKER_DISTANCE = 5;
+// Sized so the rectangle (66% of its texture width) subtends about the same
+// on-screen width as the fixed HTML #calib-target (~64% of screen width)
+// when centered, at MARKER_DISTANCE with a 70° FOV.
+const visibleWidthAtDistance = 2 * MARKER_DISTANCE * Math.tan(35 * Math.PI / 180);
+const MARKER_PLANE_SIZE = (0.64 * visibleWidthAtDistance) / 0.66;
 
-  const img = sourceTex.image;
-  if (img && img.width) {
-    // cover-fit the source image into the canvas
-    const srcAR = img.width / img.height, dstAR = W / H;
-    let sx, sy, sw, sh;
-    if (srcAR > dstAR) {
-      sh = img.height; sw = sh * dstAR; sx = (img.width - sw) / 2; sy = 0;
-    } else {
-      sw = img.width; sh = sw / dstAR; sx = 0; sy = (img.height - sh) / 2;
-    }
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, W, H);
-  }
+let alignmentMarkerMesh = null;
 
-  // feather mask via destination-in radial gradient
-  ctx.globalCompositeOperation = "destination-in";
-  const cx = W / 2, cy = H / 2;
-  const grad = ctx.createRadialGradient(cx, cy, W * 0.18, cx, cy, W * 0.62);
-  grad.addColorStop(0, "rgba(255,255,255,1)");
-  grad.addColorStop(0.72, "rgba(255,255,255,1)");
-  grad.addColorStop(1, "rgba(255,255,255,0)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
-
-  const tex = new THREE.CanvasTexture(cvs);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
-
-/* ---------------- Build the direction-mapped photo rig ---------------- */
-const PLANE_DISTANCE = 5;
-// World units. Each plane is fixed in space (oriented once via lookAt, not
-// re-aimed at the camera every frame), so tilting the phone away from dead-
-// center on a direction is really rotating the *view ray* off that plane's
-// face — a plane covers roughly ±atan((size/2)/distance) before its edge
-// enters frame. 9 only covered ~±42° and even 22 (~±66°) still showed a
-// seam on a real phone, so this is set generously large — 50 covers ~±79°,
-// comfortable margin for any realistic tilt.
-const PLANE_SIZE = 50;
-
-const photoMeshes = []; // { mesh, annotMeshes: {studs,electrical,plumbing,hvac}, dir: Vector3, def }
-let alignmentMarkerMesh = null; // bold target shown only while confirming calibration — see makeAlignmentMarkerTexture
-
-async function buildPhotoRig() {
-  for (const def of PHOTO_DEFS) {
-    const rawTex = await loadTextureWithFallback(def.file, def.key);
-    const tex = featherTexture(rawTex);
-
-    const geo = new THREE.PlaneGeometry(PLANE_SIZE, PLANE_SIZE);
-    const mat = new THREE.MeshBasicMaterial({
-      map: tex,
-      transparent: true,
-      opacity: 0,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-
-    const dir = new THREE.Vector3(...def.dir).normalize();
-    mesh.position.copy(dir).multiplyScalar(PLANE_DISTANCE);
-    mesh.lookAt(0, 0, 0);
-    mesh.renderOrder = 0;
-    wallGroup.add(mesh);
-
-    if (def.key === "front") {
-      const markerMat = new THREE.MeshBasicMaterial({
-        map: makeAlignmentMarkerTexture(),
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
-      // Deliberately NOT the shared oversized `geo` (PLANE_SIZE=50) — that
-      // size exists so the *photo* never shows an edge seam at any pan
-      // angle, but it means the crosshair pattern (drawn to look right on
-      // a normal-sized plane) would cover a huge swath of that huge plane —
-      // only visible as an extreme close-up of one small piece of it (a
-      // magenta "blob", not a recognizable target). This plane is sized so
-      // the rectangle (66% of its texture width) actually subtends about
-      // the same on-screen width as the fixed HTML #calib-target (~64% of
-      // screen width) when centered, at PLANE_DISTANCE with a 70° FOV.
-      const visibleWidthAtDistance = 2 * PLANE_DISTANCE * Math.tan(35 * Math.PI / 180);
-      const markerPlaneSize = (0.64 * visibleWidthAtDistance) / 0.66;
-      const markerGeo = new THREE.PlaneGeometry(markerPlaneSize, markerPlaneSize);
-      alignmentMarkerMesh = new THREE.Mesh(markerGeo, markerMat);
-      alignmentMarkerMesh.position.copy(mesh.position);
-      alignmentMarkerMesh.quaternion.copy(mesh.quaternion);
-      alignmentMarkerMesh.renderOrder = 2;
-      wallGroup.add(alignmentMarkerMesh);
-    }
-
-    // Per-category label layers (studs/electrical/plumbing/hvac) — same
-    // plane, drawn a hair closer to camera (renderOrder) so each sits
-    // cleanly on top of the photo instead of z-fighting with it. A
-    // direction with no annot file for a category (or a failed load) just
-    // means no toggle-able content there, not an error.
-    const annotMeshes = {};
-    for (const cat of CATEGORIES) {
-      const file = def.annots[cat];
-      annotMeshes[cat] = null;
-      if (!file) continue;
-      const annotTex = await tryLoadTexture(file);
-      if (!annotTex) continue;
-      const annotMat = new THREE.MeshBasicMaterial({
-        map: annotTex,
-        transparent: true,
-        opacity: 0,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      });
-      const annotMesh = new THREE.Mesh(geo, annotMat);
-      annotMesh.position.copy(mesh.position);
-      annotMesh.quaternion.copy(mesh.quaternion);
-      annotMesh.renderOrder = 1;
-      wallGroup.add(annotMesh);
-      annotMeshes[cat] = annotMesh;
-    }
-
-    photoMeshes.push({ mesh, annotMeshes, dir, def });
-  }
-
-  // Wide establishing shot as a low-opacity backdrop sphere, filling gaps
-  // between the five directional photos as the camera pans past them.
-  const wideRawTex = await loadTextureWithFallback(WIDE_DEF.file, "Wide Establishing View");
-  wideRawTex.wrapS = THREE.RepeatWrapping;
-  wideRawTex.wrapT = THREE.ClampToEdgeWrapping;
-  wideRawTex.repeat.set(2, 1);
-  const wideGeo = new THREE.SphereGeometry(6.4, 48, 32);
-  const wideMat = new THREE.MeshBasicMaterial({
-    map: wideRawTex,
-    side: THREE.BackSide,
+function buildAlignmentMarker() {
+  const markerMat = new THREE.MeshBasicMaterial({
+    map: makeAlignmentMarkerTexture(),
     transparent: true,
     opacity: 0,
+    side: THREE.DoubleSide,
     depthWrite: false,
   });
-  const wideSphere = new THREE.Mesh(wideGeo, wideMat);
-  wallGroup.add(wideSphere);
+  const markerGeo = new THREE.PlaneGeometry(MARKER_PLANE_SIZE, MARKER_PLANE_SIZE);
+  const mesh = new THREE.Mesh(markerGeo, markerMat);
+  mesh.position.set(0, 0, -MARKER_DISTANCE);
+  mesh.renderOrder = 10; // always drawn on top of the pano + any category layers
+  wallGroup.add(mesh);
+  return mesh;
+}
 
-  showMissingAssetBanner();
-
-  return { wideSphere };
+/* ---------------- Build the real equirectangular pano sphere(s) ---------------- */
+// Category layers render at a hair larger radius + higher renderOrder than
+// the base pano, purely to avoid z-fighting — not a visible size difference
+// at these radii.
+function buildPanoSphere(tex, radius, renderOrder) {
+  // Standard equirect-skybox technique: flip the sphere inside-out via
+  // negative X scale so the UVs read correctly from a viewpoint inside it
+  // (a plain BackSide sphere would mirror the image left-right, which
+  // matters a lot for a real room capture — text/exits would read backwards).
+  const geo = new THREE.SphereGeometry(radius, 64, 40);
+  geo.scale(-1, 1, 1);
+  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.renderOrder = renderOrder;
+  wallGroup.add(mesh);
+  return mesh;
 }
 
 function showMissingAssetBanner() {
   if (!missingAssets.length) return;
   const banner = document.getElementById("asset-banner");
   const text = document.getElementById("asset-banner-text");
-  text.innerHTML = `<b>Placeholder images in use</b> for: ${missingAssets.join(", ")}. Drop matching JPGs into the project folder and reload to swap them in.`;
+  text.innerHTML = `<b>Placeholder image in use</b> for: ${missingAssets.join(", ")}. Drop pano.jpg into the project folder and reload to swap it in.`;
   banner.classList.add("show");
   document.getElementById("asset-banner-close").addEventListener("click", () => {
     banner.classList.remove("show");
   });
 }
 
-/* ---------------- Build the real equirectangular pano sphere, if captured ---------------- */
-function buildPanoSphere(tex) {
-  // Standard equirect-skybox technique: flip the sphere inside-out via
-  // negative X scale so the UVs read correctly from a viewpoint inside it
-  // (a plain BackSide sphere would mirror the image left-right, which
-  // matters a lot for a real room capture — text/exits would read backwards).
-  const geo = new THREE.SphereGeometry(6, 64, 40);
-  geo.scale(-1, 1, 1);
-  const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0, depthWrite: false });
-  const mesh = new THREE.Mesh(geo, mat);
-  wallGroup.add(mesh);
-  return mesh;
-}
-
-let wideSphereRef = null;
 let panoSphereRef = null;
-let usingPano = false;
+const categoryMeshes = {}; // { studs, electrical, plumbing, hvac } -> Mesh | null
 
 async function buildRig() {
-  const panoTex = await tryLoadTexture(PANO_FILE);
-  if (panoTex) {
-    usingPano = true;
-    panoSphereRef = buildPanoSphere(panoTex);
-    return;
+  const panoTex = await loadTextureWithFallback(PANO_FILE, "360° Pano");
+  panoSphereRef = buildPanoSphere(panoTex, 6, 0);
+  alignmentMarkerMesh = buildAlignmentMarker();
+
+  let i = 1;
+  for (const cat of CATEGORIES) {
+    const tex = await tryLoadTexture(CATEGORY_FILES[cat]);
+    categoryMeshes[cat] = tex ? buildPanoSphere(tex, 6 + i * 0.01, i) : null;
+    i++;
   }
-  const rig = await buildPhotoRig();
-  wideSphereRef = rig.wideSphere;
+
+  showMissingAssetBanner();
 }
 const rigReady = buildRig();
 
@@ -929,7 +805,12 @@ startBtn.addEventListener("click", async () => {
     startScreen.style.display = "none";
     document.getElementById("recalibrate-btn").classList.add("show");
     document.getElementById("peephole-btn").classList.add("show");
-    document.getElementById("labels-wrap").classList.add("show");
+    // labels-wrap (category pills) intentionally NOT shown here — it used
+    // to appear immediately, sitting directly behind the calibration card
+    // for the entire calibrate flow and colliding with the compact
+    // "Looks Good" button. It's meaningless before calibration anyway
+    // (nothing's revealed yet), so it only shows once confirmCalibration()
+    // actually commits.
 
     // The X-ray reveal stays off (state.revealed starts false) until the
     // presenter explicitly taps Calibrate, even without a compass — that
@@ -979,7 +860,7 @@ function drawSpark(ctx, x, y, r) {
   ctx.closePath();
 }
 
-function fireSparkleWipe() {
+function fireSparkleWipe(onComplete) {
   const W = window.innerWidth, H = window.innerHeight;
   const reduceMotion = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const cx = W / 2, cy = H / 2;
@@ -1107,8 +988,12 @@ function fireSparkleWipe() {
       fxCtx.restore();
     }
 
-    if (t < 1) requestAnimationFrame(frame);
-    else fxCtx.clearRect(0, 0, W, H);
+    if (t < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      fxCtx.clearRect(0, 0, W, H);
+      if (onComplete) onComplete();
+    }
   }
   requestAnimationFrame(frame);
 }
@@ -1155,11 +1040,18 @@ function runCalibration() {
 
 function confirmCalibration() {
   document.getElementById("calibrate-overlay").classList.remove("show");
-  document.getElementById("look-hint").classList.add("show");
-  state.hintTimer = setTimeout(hideLookHint, 5000);
+  document.getElementById("labels-wrap").classList.add("show");
   // The fanfare is saved for this final commit — the moment the presenter
   // has actually confirmed alignment, not the rough auto-aim guess.
-  fireSparkleWipe();
+  // The look-hint (icon + "Pan & tilt...") sits dead-center on screen —
+  // exactly where the peephole reveal is — so it used to fade in
+  // alongside the fanfare and was fully visible before the 1.5s wipe even
+  // finished, stepping on the reveal it was supposed to follow. Now it
+  // only appears once the fanfare has actually cleared.
+  fireSparkleWipe(() => {
+    document.getElementById("look-hint").classList.add("show");
+    state.hintTimer = setTimeout(hideLookHint, 5000);
+  });
   calibrationPhase = "initial";
   calibrateBtn.textContent = "Calibrate";
   calibrateCardText.textContent = "Point at the center of the whiteboard on the front wall, then tap Calibrate.";
@@ -1176,6 +1068,7 @@ document.getElementById("recalibrate-btn").addEventListener("click", () => {
   calibrateBtn.textContent = "Calibrate";
   calibrateCardText.textContent = "Point at the center of the whiteboard on the front wall, then tap Calibrate.";
   calibrateCard.classList.remove("compact");
+  document.getElementById("labels-wrap").classList.remove("show");
   document.getElementById("calibrate-overlay").classList.add("show");
 });
 
@@ -1204,8 +1097,6 @@ window.addEventListener("resize", () => {
 /* ---------------- Render loop ---------------- */
 const SMOOTHING = 0.12;        // gyro feel: lower = smoother/laggier, higher = snappier
 const REVEAL_SMOOTHING = 0.10; // toggle crossfade speed
-const forward = new THREE.Vector3();
-const WEIGHT_POWER = 1.6;      // higher = tighter/snappier crossfade between adjacent photos
 
 function animate() {
   requestAnimationFrame(animate);
@@ -1230,36 +1121,17 @@ function animate() {
   // opaque here instead of blending at BLEND_OPACITY.
   const activeBlend = peepholeMode ? 1 : BLEND_OPACITY;
 
-  if (usingPano) {
-    if (panoSphereRef) {
-      panoSphereRef.material.opacity = activeBlend * state.revealFactor;
+  if (panoSphereRef) {
+    panoSphereRef.material.opacity = activeBlend * state.revealFactor;
+  }
+  for (const cat of CATEGORIES) {
+    const mesh = categoryMeshes[cat];
+    if (mesh) {
+      mesh.material.opacity = state[CATEGORY_STATE_KEY[cat]] ? activeBlend * state.revealFactor : 0;
     }
-  } else {
-    camera.getWorldDirection(forward);
-
-    const categoryOn = {
-      studs: state.showStuds,
-      electrical: state.showElectrical,
-      plumbing: state.showPlumbing,
-      hvac: state.showHvac,
-    };
-    for (const { mesh, annotMeshes, dir, def } of photoMeshes) {
-      const dot = Math.max(0, forward.dot(dir));
-      const weight = Math.pow(dot, peepholeMode ? 1 : WEIGHT_POWER);
-      mesh.material.opacity = weight * activeBlend * state.revealFactor;
-      for (const cat of CATEGORIES) {
-        const annotMesh = annotMeshes[cat];
-        if (annotMesh) {
-          annotMesh.material.opacity = categoryOn[cat] ? weight * activeBlend * state.revealFactor : 0;
-        }
-      }
-      if (def.key === "front" && alignmentMarkerMesh) {
-        alignmentMarkerMesh.material.opacity = calibrationPhase === "confirming" ? weight * activeBlend * state.revealFactor : 0;
-      }
-    }
-    if (wideSphereRef) {
-      wideSphereRef.material.opacity = (peepholeMode ? WIDE_BLEND_OPACITY + (1 - WIDE_BLEND_OPACITY) * 0.5 : WIDE_BLEND_OPACITY) * state.revealFactor;
-    }
+  }
+  if (alignmentMarkerMesh) {
+    alignmentMarkerMesh.material.opacity = calibrationPhase === "confirming" ? activeBlend * state.revealFactor : 0;
   }
 
   renderer.render(scene, camera);
