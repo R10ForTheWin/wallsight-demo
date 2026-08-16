@@ -175,6 +175,18 @@
     border-radius: 18px; padding: 22px 22px 18px; text-align: center;
     box-shadow: 0 12px 40px rgba(0,0,0,0.45);
     pointer-events: auto;
+    transition: max-width 0.2s ease, padding 0.2s ease;
+  }
+  /* While actively dragging to confirm, the full card (icon/heading/copy)
+     just eats screen space needed to actually see the alignment — collapse
+     to a snug pill around the button alone. */
+  #calibrate-card.compact {
+    max-width: 220px; padding: 10px;
+  }
+  #calibrate-card.compact .icon,
+  #calibrate-card.compact h2,
+  #calibrate-card.compact p {
+    display: none;
   }
   #calibrate-card .icon { font-size: 30px; margin-bottom: 8px; }
   #calibrate-card h2 { font-size: 17px; margin: 0 0 8px; font-weight: 700; }
@@ -1110,6 +1122,7 @@ function fireSparkleWipe() {
 let calibrationPhase = "initial"; // "initial" | "confirming"
 const calibrateBtn = document.getElementById("calibrate-btn");
 const calibrateCardText = document.getElementById("calibrate-card-text");
+const calibrateCard = document.getElementById("calibrate-card");
 
 function runCalibration() {
   if (calibrationPhase === "confirming") {
@@ -1133,6 +1146,10 @@ function runCalibration() {
     calibrateCardText.textContent = "Drag anywhere to swipe the pink target until it lands inside the outline above — then tap Looks Good.";
     calibrateBtn.textContent = "Looks Good";
     calibrateBtn.disabled = false;
+    // Collapse to a small button-only pill now — the full card (icon,
+    // heading, paragraph) was covering most of the screen right when the
+    // user needs to actually see the alignment to drag it into place.
+    calibrateCard.classList.add("compact");
   }, 500);
 }
 
@@ -1146,6 +1163,7 @@ function confirmCalibration() {
   calibrationPhase = "initial";
   calibrateBtn.textContent = "Calibrate";
   calibrateCardText.textContent = "Point at the center of the whiteboard on the front wall, then tap Calibrate.";
+  calibrateCard.classList.remove("compact");
 }
 
 document.getElementById("calibrate-btn").addEventListener("click", runCalibration);
@@ -1157,6 +1175,7 @@ document.getElementById("recalibrate-btn").addEventListener("click", () => {
   calibrationPhase = "initial";
   calibrateBtn.textContent = "Calibrate";
   calibrateCardText.textContent = "Point at the center of the whiteboard on the front wall, then tap Calibrate.";
+  calibrateCard.classList.remove("compact");
   document.getElementById("calibrate-overlay").classList.add("show");
 });
 
