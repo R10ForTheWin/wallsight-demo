@@ -806,7 +806,12 @@ function setupDragFallback() {
 setupDragFallback();
 
 /* ---------------- Peephole reveal mode ---------------- */
-let peepholeMode = true;
+// Experimenting with full-screen ("no walls" everywhere, not just inside
+// a window) as the default post-calibration view — peepholeMode now only
+// governs the CIRCLE (post-commit) shape, not the rect aiming guide,
+// which always shows during calibration regardless of this toggle since
+// you need it to aim no matter which mode you'll land in afterward.
+let peepholeMode = false;
 // "rect" is the small aiming-guide shape used only while the calibration
 // overlay is open (clears #calibrate-card); "circle" is the large,
 // true-centered peephole used for the actual reveal once calibration has
@@ -817,11 +822,13 @@ const peepholeBtn = document.getElementById("peephole-btn");
 const peepholeRingRect = document.getElementById("peephole-ring-rect");
 const peepholeRingCircle = document.getElementById("peephole-ring-circle");
 function applyPeepholeMode() {
-  canvas.classList.toggle("peephole-rect", peepholeMode && peepholeShape === "rect");
-  canvas.classList.toggle("peephole-circle", peepholeMode && peepholeShape === "circle");
+  const showRect = peepholeShape === "rect";
+  const showCircle = peepholeMode && peepholeShape === "circle";
+  canvas.classList.toggle("peephole-rect", showRect);
+  canvas.classList.toggle("peephole-circle", showCircle);
   peepholeBtn.classList.toggle("active", peepholeMode);
-  peepholeRingRect.classList.toggle("show", peepholeMode && peepholeShape === "rect");
-  peepholeRingCircle.classList.toggle("show", peepholeMode && peepholeShape === "circle");
+  peepholeRingRect.classList.toggle("show", showRect);
+  peepholeRingCircle.classList.toggle("show", showCircle);
 }
 function setPeepholeShape(shape) {
   peepholeShape = shape;
@@ -1185,12 +1192,9 @@ function resetCalibrationUI() {
   calibrateBtn.textContent = "Click here once centered";
   calibrateBtn.disabled = false;
   calibrateBtn.onclick = startAutoDetect;
-  // No manual-calibration invite here — auto-detect is meant to just be
-  // tried first. If it can't find the whiteboard (worker load timeout,
-  // corner detection repeatedly failing, or scan timeout), switchToManual()
-  // still kicks in on its own and surfaces its own escape hatch there.
-  calibrateManualLink.style.display = "none";
-  calibrateManualLink.onclick = null;
+  calibrateManualLink.style.display = "block";
+  calibrateManualLink.textContent = "Use manual calibration";
+  calibrateManualLink.onclick = () => switchToManual();
 }
 
 // The fallback state: aim + tap, no detection involved. Reachable from
