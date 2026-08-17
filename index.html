@@ -185,7 +185,7 @@
     transition: opacity 0.15s;
   }
   #calibrate-btn:disabled { opacity: 0.6; cursor: default; }
-  #calibrate-manual-link {
+  #calibrate-manual-link, #calibrate-auto-link {
     display: none; background: none; border: none; color: #93c5fd;
     font-size: 12.5px; margin-top: 12px; text-decoration: underline;
     cursor: pointer; padding: 4px; pointer-events: auto;
@@ -353,9 +353,10 @@
 
 <!-- Calibration overlay: aligns the panorama's "front" to a real wall in the room -->
 <div id="calibrate-overlay">
-  <!-- Manual-mode aiming bullseye — hidden unless auto-detect isn't found/used,
-       see resetCalibrationUI() / fallbackToManual(). -->
-  <div id="calib-target" style="display:none">
+  <!-- Manual-mode aiming bullseye — visible by default. Manual is the
+       primary calibration path (no dependency on opencv.js loading/
+       running at all), not a fallback — see resetCalibrationUI(). -->
+  <div id="calib-target">
     <svg class="bullseye" viewBox="0 0 100 100" fill="none">
       <circle cx="50" cy="50" r="42" stroke="#3b82f6" stroke-width="4"/>
       <circle cx="50" cy="50" r="24" stroke="#3b82f6" stroke-width="4"/>
@@ -373,8 +374,9 @@
   <div id="calibrate-card">
     <div class="icon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></div>
     <h2 id="calibrate-card-heading">Calibrate Direction</h2>
-    <p id="calibrate-card-text">Point your phone at the whiteboard in the center of the room.</p>
-    <button id="calibrate-btn">Begin Calibration</button>
+    <p id="calibrate-card-text">Hold your phone still, aimed at the center of the whiteboard on the front wall — then tap Calibrate.</p>
+    <button id="calibrate-btn">Calibrate</button>
+    <button id="calibrate-auto-link">Try automatic detection</button>
     <button id="calibrate-manual-link">Cancel</button>
   </div>
 </div>
@@ -1044,12 +1046,13 @@ const calibrateCardText = document.getElementById("calibrate-card-text");
 const calibrateCardHeading = document.getElementById("calibrate-card-heading");
 const calibrateCard = document.getElementById("calibrate-card");
 const calibrateManualLink = document.getElementById("calibrate-manual-link");
+const calibrateAutoLink = document.getElementById("calibrate-auto-link");
 const calibTarget = document.getElementById("calib-target");
 const cornerBoxSvg = document.getElementById("corner-box-svg");
 const cornerBoxPoly = document.getElementById("corner-box-poly");
 
-const DEFAULT_CALIBRATE_TEXT = "Point your phone at the whiteboard in the center of the room.";
 const MANUAL_CALIBRATE_TEXT = "Hold your phone still, aimed at the center of the whiteboard on the front wall — then tap Calibrate.";
+const AUTO_DETECT_TEXT = "Point your phone at the whiteboard in the center of the room.";
 
 // Applies whatever yaw/pitch trim was already computed (0,0 for the plain
 // manual tap) and runs the shared reveal: close the overlay, show the
@@ -1070,50 +1073,36 @@ function commitCalibration(extraYawTrim, extraPitchTrim) {
   });
 }
 
-function resetCalibrationUI() {
+// Manual is the primary calibration path — instant, purely synchronous,
+// zero dependency on opencv.js loading or running at all. Auto-detect
+// (see startAutoDetect below) is an explicit opt-in via "Try automatic
+// detection", not something in the default critical path, after a real
+// device test showed the ~10MB WASM load appearing to wedge the main
+// thread badly enough that even a same-thread JS timeout / Cancel tap
+// couldn't preempt it. This is always the state calibration starts in
+// and always what "Cancel" (during auto-detect) or the recalibrate icon
+// return to.
+function resetCalibrationUI(reasonText) {
   calibrationGeneration++;
   if (autoDetectHandle) { autoDetectHandle.cancelled = true; autoDetectHandle = null; }
-  calibTarget.style.display = "none";
+  calibTarget.style.display = "";
   cornerBoxSvg.style.display = "none";
   cornerBoxPoly.classList.remove("locked");
   calibrateCardHeading.style.display = "";
   calibrateCard.querySelector(".icon").style.display = "";
+  calibrateAutoLink.style.display = "block";
   calibrateManualLink.style.display = "none";
-  calibrateCardHeading.textContent = "Calibrate Direction";
-  calibrateCardText.textContent = DEFAULT_CALIBRATE_TEXT;
-  calibrateBtn.style.display = "";
-  calibrateBtn.textContent = "Begin Calibration";
-  calibrateBtn.disabled = false;
-  calibrateBtn.onclick = startAutoDetect;
-}
-
-function switchToManual(reasonText) {
-  calibrationGeneration++;
-  if (autoDetectHandle) { autoDetectHandle.cancelled = true; autoDetectHandle = null; }
-  cornerBoxSvg.style.display = "none";
-  cornerBoxPoly.classList.remove("locked");
-  calibrateManualLink.style.display = "none";
-  calibrateCardHeading.style.display = "";
-  calibrateCard.querySelector(".icon").style.display = "";
   calibrateCardHeading.textContent = "Calibrate Direction";
   calibrateCardText.textContent = reasonText || MANUAL_CALIBRATE_TEXT;
   calibrateBtn.style.display = "";
   calibrateBtn.textContent = "Calibrate";
   calibrateBtn.disabled = false;
   calibrateBtn.onclick = runManualCalibration;
-  calibTarget.style.display = "";
 }
 
-// Full abort, not a switch to manual — closes the overlay outright so a
-// stuck/broken attempt (either flow) always has a real way out. Re-open
-// via the recalibrate icon in the top bar, which is visible throughout
-// (set on the start flow, not gated behind a working calibration).
+// "Cancel" during auto-detect — returns to the default manual state
+// (not a full overlay close; manual calibration IS the base state now).
 function cancelCalibration() {
-  calibrationGeneration++;
-  if (autoDetectHandle) { autoDetectHandle.cancelled = true; autoDetectHandle = null; }
-  cornerBoxSvg.style.display = "none";
-  cornerBoxPoly.classList.remove("locked");
-  document.getElementById("calibrate-overlay").classList.remove("show");
   resetCalibrationUI();
 }
 
@@ -1311,6 +1300,8 @@ function videoNormToViewportPercent(nx, ny, video) {
 
 async function startAutoDetect() {
   const myGeneration = ++calibrationGeneration;
+  calibTarget.style.display = "none";
+  calibrateAutoLink.style.display = "none";
   calibrateBtn.disabled = true;
   calibrateBtn.textContent = "Loading…";
   // Shown immediately, not after loading succeeds — a slow/stuck load
@@ -1318,6 +1309,7 @@ async function startAutoDetect() {
   // appeared once cv was already ready.
   calibrateCardHeading.style.display = "none";
   calibrateCard.querySelector(".icon").style.display = "none";
+  calibrateCardText.textContent = AUTO_DETECT_TEXT;
   calibrateManualLink.style.display = "block";
 
   let cv;
@@ -1325,7 +1317,7 @@ async function startAutoDetect() {
     cv = await withTimeout(loadOpenCv(), OPENCV_LOAD_TIMEOUT_MS);
   } catch (e) {
     if (myGeneration === calibrationGeneration) {
-      switchToManual("Couldn't load corner detection in time — hold your phone still, aimed at the center of the whiteboard on the front wall, then tap Calibrate.");
+      resetCalibrationUI("Couldn't load corner detection in time — hold your phone still, aimed at the center of the whiteboard on the front wall, then tap Calibrate.");
     }
     return;
   }
@@ -1355,7 +1347,7 @@ async function startAutoDetect() {
   function tick() {
     if (handle.cancelled) return;
     if (performance.now() - startedAt > AUTO_DETECT_TIMEOUT_MS) {
-      switchToManual("Having trouble finding the whiteboard automatically — hold your phone still, aimed at its center, then tap Calibrate.");
+      resetCalibrationUI("Having trouble finding the whiteboard automatically — hold your phone still, aimed at its center, then tap Calibrate.");
       return;
     }
     let quad;
@@ -1369,7 +1361,7 @@ async function startAutoDetect() {
       tickErrorCount++;
       showDebugError("corner detection: " + e.message + (tickErrorCount > 1 ? ` (x${tickErrorCount})` : ""));
       if (tickErrorCount >= 5) {
-        switchToManual("Corner detection kept failing — hold your phone still, aimed at the whiteboard, then tap Calibrate.");
+        resetCalibrationUI("Corner detection kept failing — hold your phone still, aimed at the whiteboard, then tap Calibrate.");
         return;
       }
       handle.timer = setTimeout(tick, DETECT_INTERVAL_MS);
@@ -1417,6 +1409,7 @@ function finishAutoDetect(cxPercent, cyPercent) {
 }
 
 calibrateManualLink.addEventListener("click", cancelCalibration);
+calibrateAutoLink.addEventListener("click", startAutoDetect);
 document.getElementById("recalibrate-btn").addEventListener("click", () => {
   // Re-aiming hides the reveal again until the next confirmed calibration,
   // so the "wipe" fanfare always means the same thing: calibration was
