@@ -48,19 +48,49 @@
      at full correct size. Width/height/clearance must be kept in sync by
      hand across this block, this block's clip-path, and #peephole-ring
      below (all duplicate the same 78vmin/38vmin/440px numbers) — that
-     duplication is the tradeoff for sidestepping the Safari bug. */
-  #three-canvas.peephole {
-    -webkit-clip-path: inset(calc(100vh - 440px - 38vmin) calc((100vw - 78vmin) / 2) 440px calc((100vw - 78vmin) / 2) round 20px);
-    clip-path: inset(calc(100vh - 440px - 38vmin) calc((100vw - 78vmin) / 2) 440px calc((100vw - 78vmin) / 2) round 20px);
+     duplication is the tradeoff for sidestepping the Safari bug.
+     Top inset uses 100% (this element's own resolved height, from its
+     own inset:0/width:100%/height:100% box), not 100vh — a separate
+     100vh query and this element's actual box height are NOT guaranteed
+     to resolve to the same pixel value under iOS Safari's dynamic
+     toolbar model (position:fixed bottom-anchoring and vh units aren't
+     documented to always agree on which viewport — visual vs layout —
+     they're measured against). #peephole-ring and #center-reticle
+     below are built the same bottom+vmin way, with no vh anywhere, for
+     the same reason — this was reported as the crosshair visibly not
+     matching the peephole's actual center on a real device.
+
+     Two shapes, switched by JS (see setPeepholeShape()): "rect" is this
+     aiming-guide shape, active only while the calibration overlay is
+     open (small, off-center to clear #calibrate-card). "circle" is the
+     original, much larger, true-centered peephole used once calibration
+     has committed and there's no card to avoid — reintroduced after the
+     rect shape was reported as too small/cramped for actually exploring
+     the reveal, not just aiming at the whiteboard. */
+  #three-canvas.peephole-rect {
+    -webkit-clip-path: inset(calc(100% - 440px - 38vmin) calc((100vw - 78vmin) / 2) 440px calc((100vw - 78vmin) / 2) round 20px);
+    clip-path: inset(calc(100% - 440px - 38vmin) calc((100vw - 78vmin) / 2) 440px calc((100vw - 78vmin) / 2) round 20px);
   }
-  #peephole-ring {
+  #three-canvas.peephole-circle {
+    -webkit-clip-path: circle(46vmin at 50% 50%);
+    clip-path: circle(46vmin at 50% 50%);
+  }
+  #peephole-ring-rect {
     position: fixed; z-index: 16; left: 50%; bottom: 440px;
     width: 78vmin; height: 38vmin; margin: 0 0 0 -39vmin;
     border-radius: 20px; pointer-events: none; display: none;
     border: 1.5px solid rgba(147,197,253,0.8);
     box-shadow: 0 0 10px rgba(59,130,246,0.4), inset 0 0 10px rgba(59,130,246,0.25);
   }
-  #peephole-ring.show { display: block; }
+  #peephole-ring-rect.show { display: block; }
+  #peephole-ring-circle {
+    position: fixed; z-index: 16; left: 50%; top: 50%;
+    width: 92vmin; height: 92vmin; margin: -46vmin 0 0 -46vmin;
+    border-radius: 50%; pointer-events: none; display: none;
+    border: 1.5px solid rgba(147,197,253,0.8);
+    box-shadow: 0 0 10px rgba(59,130,246,0.4), inset 0 0 10px rgba(59,130,246,0.25);
+  }
+  #peephole-ring-circle.show { display: block; }
 
   /* ---------- Start / Permission overlay ---------- */
   #start-screen {
@@ -136,12 +166,17 @@
 
 
   /* ---------- Center reticle: aiming aid ---------- */
-  /* Must match the peephole/#calib-target's center below (same
-     100vh - 440px - 19vmin expression) or the crosshair drifts off the
-     peephole/bullseye's actual center. */
+  /* bottom-anchored (not top:calc(100vh - ...)) to match #peephole-ring's
+     own bottom+vmin math exactly, with no vh cross-reference — see the
+     long comment on #three-canvas.peephole for why that mismatch is a
+     real, reported bug (crosshair visibly off the peephole's actual
+     center), not a theoretical one. 440px+19vmin is the ring's own
+     center-from-bottom (bottom:440px, half of its 38vmin height); minus
+     9px (half this element's fixed 18px height) so bottom-edge
+     positioning lands the CENTER, not the edge, on that point. */
   #center-reticle {
-    position: fixed; z-index: 16; left: 50%; top: calc(100vh - 440px - 19vmin);
-    width: 18px; height: 18px; margin: -9px 0 0 -9px;
+    position: fixed; z-index: 16; left: 50%; bottom: calc(440px + 19vmin - 9px);
+    width: 18px; height: 18px; margin: 0 0 0 -9px;
     pointer-events: none; opacity: 0;
   }
   #center-reticle::before, #center-reticle::after {
@@ -177,7 +212,7 @@
      #three-canvas.peephole for why top-relative positioning wasn't
      enough). */
   #calib-target {
-    position: absolute; left: 50%; top: calc(100vh - 440px - 19vmin); transform: translate(-50%, -50%);
+    position: absolute; left: 50%; bottom: calc(440px + 19vmin); transform: translate(-50%, 50%);
     width: min(46vw, 260px); aspect-ratio: 1 / 1;
     pointer-events: none;
   }
@@ -365,7 +400,8 @@
 
 <!-- Faint center reticle: aiming aid for the peephole and for manual trim -->
 <div id="center-reticle"></div>
-<div id="peephole-ring"></div>
+<div id="peephole-ring-rect"></div>
+<div id="peephole-ring-circle"></div>
 
 
 <!-- Calibration overlay: aligns the panorama's "front" to a real wall in the room -->
@@ -437,9 +473,7 @@
     <span>WALLSIGHT</span>
   </div>
   <h1>See What's Behind This Wall</h1>
-  <p>Point your camera at any wall and move your phone to reveal the framing, conduit, and ductwork hidden behind it — no app required.</p>
-  <button id="start-btn">Start Camera</button>
-  <div id="start-note">This demo needs camera and motion access. Nothing is recorded or uploaded — everything stays on your phone.</div>
+  <button id="start-btn">Remove Wall</button>
   <div id="start-error"></div>
 </div>
 
@@ -763,12 +797,25 @@ setupDragFallback();
 
 /* ---------------- Peephole reveal mode ---------------- */
 let peepholeMode = true;
+// "rect" is the small aiming-guide shape used only while the calibration
+// overlay is open (clears #calibrate-card); "circle" is the large,
+// true-centered peephole used for the actual reveal once calibration has
+// committed — see setPeepholeShape() callers in commitCalibration() /
+// resetCalibrationUI().
+let peepholeShape = "rect";
 const peepholeBtn = document.getElementById("peephole-btn");
-const peepholeRing = document.getElementById("peephole-ring");
+const peepholeRingRect = document.getElementById("peephole-ring-rect");
+const peepholeRingCircle = document.getElementById("peephole-ring-circle");
 function applyPeepholeMode() {
-  canvas.classList.toggle("peephole", peepholeMode);
+  canvas.classList.toggle("peephole-rect", peepholeMode && peepholeShape === "rect");
+  canvas.classList.toggle("peephole-circle", peepholeMode && peepholeShape === "circle");
   peepholeBtn.classList.toggle("active", peepholeMode);
-  peepholeRing.classList.toggle("show", peepholeMode);
+  peepholeRingRect.classList.toggle("show", peepholeMode && peepholeShape === "rect");
+  peepholeRingCircle.classList.toggle("show", peepholeMode && peepholeShape === "circle");
+}
+function setPeepholeShape(shape) {
+  peepholeShape = shape;
+  applyPeepholeMode();
 }
 applyPeepholeMode();
 peepholeBtn.addEventListener("click", () => {
@@ -1085,6 +1132,9 @@ function commitCalibration(extraYawTrim, extraPitchTrim) {
   state.yawTrim = extraYawTrim || 0;
   state.pitchTrim = extraPitchTrim || 0;
   state.revealed = true;
+  // Switch to the large centered circle now, hidden behind the fanfare
+  // below — the small rect was only ever an aiming guide for the card.
+  setPeepholeShape("circle");
   document.getElementById("calibrate-overlay").classList.remove("show");
   document.getElementById("labels-wrap").classList.add("show");
   // The look-hint (icon + "Pan & tilt...") sits dead-center on screen —
@@ -1113,6 +1163,7 @@ function commitCalibration(extraYawTrim, extraPitchTrim) {
 function resetCalibrationUI() {
   calibrationGeneration++;
   cancelInFlightAutoDetect();
+  setPeepholeShape("rect"); // back to the small aiming guide whenever the card is open
   calibTarget.style.display = "none";
   cornerBoxSvg.style.display = "none";
   cornerBoxPoly.classList.remove("locked");
@@ -1135,6 +1186,7 @@ function resetCalibrationUI() {
 function switchToManual(reasonText) {
   calibrationGeneration++;
   cancelInFlightAutoDetect();
+  setPeepholeShape("rect");
   cornerBoxSvg.style.display = "none";
   cornerBoxPoly.classList.remove("locked");
   calibrateCardHeading.style.display = "";
@@ -1479,10 +1531,12 @@ function animate() {
   state.yaw += (state.targetYaw - state.yaw) * SMOOTHING;
   state.pitch += (state.targetPitch - state.pitch) * SMOOTHING;
   state.revealFactor += ((state.revealed ? 1 : 0) - state.revealFactor) * REVEAL_SMOOTHING;
-  // Always visible (not gated to revealFactor) — it's an aiming aid for
-  // the peephole rectangle, useful during calibration too, not just once
-  // something's actually revealed.
-  centerReticle.style.opacity = 0.6;
+  // Aiming aid for the small rect peephole only — it's bottom-anchored to
+  // match that shape's off-center position, so it'd read as a stray,
+  // mispositioned crosshair once the peephole switches to the large
+  // centered circle after calibration commits. Not gated to revealFactor
+  // otherwise (useful during calibration itself, not just once revealed).
+  centerReticle.style.opacity = peepholeShape === "rect" ? 0.6 : 0;
 
   camera.rotation.order = "YXZ";
   camera.rotation.y = state.yaw;
