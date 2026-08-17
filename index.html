@@ -31,26 +31,31 @@
     z-index: 1; touch-action: none;
   }
   /* Peephole mode: a rectangle shows the x-ray layer with a crisp cutoff —
-     rest of the canvas is clipped to transparent. Vertically off-center
-     (38vh, not 50%) so it never overlaps #calibrate-card, which is
-     anchored to the bottom of the screen — it used to sit dead-center and
-     visibly collide with the card. Insets are hardcoded numbers, not
-     calc() off CSS custom properties — Safari has a real, documented bug
-     failing to resolve var() inside clip-path/-webkit-clip-path; the
-     symptom is exactly what showed up on-device (content squashed into a
-     thin sliver) despite #peephole-ring, which uses the same numbers
-     directly with no custom properties, rendering at full correct size.
-     Width/height must be kept in sync by hand across this block, this
-     block's clip-path, and #peephole-ring below (all three duplicate the
-     same 78vmin/46vmin/38vh numbers) — that duplication is the tradeoff
-     for sidestepping the Safari bug. */
+     rest of the canvas is clipped to transparent. Anchored to the BOTTOM
+     of the screen (440px clearance), not centered/positioned from the
+     top — #calibrate-card's height is fixed in pixels (built from fixed
+     px padding/font-sizes), but a top-relative position (the previous
+     38vh) leaves a gap that's only a fixed fraction of *screen* height,
+     which shrinks on shorter devices independent of the card's actual
+     (roughly constant) height — on a short-enough phone the peephole's
+     bottom edge collided with the card again despite clearing it on
+     other devices. Anchoring both from the bottom in comparable absolute
+     terms keeps the gap consistent regardless of device height. Insets
+     are hardcoded numbers, not calc() off CSS custom properties — Safari
+     has a real, documented bug failing to resolve var() inside clip-path/
+     -webkit-clip-path; the symptom was exactly content squashed into a
+     thin sliver despite #peephole-ring (no custom properties) rendering
+     at full correct size. Width/height/clearance must be kept in sync by
+     hand across this block, this block's clip-path, and #peephole-ring
+     below (all duplicate the same 78vmin/38vmin/440px numbers) — that
+     duplication is the tradeoff for sidestepping the Safari bug. */
   #three-canvas.peephole {
-    -webkit-clip-path: inset(calc(38vh - 23vmin) calc((100vw - 78vmin) / 2) calc(62vh - 23vmin) calc((100vw - 78vmin) / 2) round 20px);
-    clip-path: inset(calc(38vh - 23vmin) calc((100vw - 78vmin) / 2) calc(62vh - 23vmin) calc((100vw - 78vmin) / 2) round 20px);
+    -webkit-clip-path: inset(calc(100vh - 440px - 38vmin) calc((100vw - 78vmin) / 2) 440px calc((100vw - 78vmin) / 2) round 20px);
+    clip-path: inset(calc(100vh - 440px - 38vmin) calc((100vw - 78vmin) / 2) 440px calc((100vw - 78vmin) / 2) round 20px);
   }
   #peephole-ring {
-    position: fixed; z-index: 16; left: 50%; top: 38vh;
-    width: 78vmin; height: 46vmin; margin: -23vmin 0 0 -39vmin;
+    position: fixed; z-index: 16; left: 50%; bottom: 440px;
+    width: 78vmin; height: 38vmin; margin: 0 0 0 -39vmin;
     border-radius: 20px; pointer-events: none; display: none;
     border: 1.5px solid rgba(147,197,253,0.8);
     box-shadow: 0 0 10px rgba(59,130,246,0.4), inset 0 0 10px rgba(59,130,246,0.25);
@@ -131,11 +136,11 @@
 
 
   /* ---------- Center reticle: aiming aid ---------- */
-  /* top:38vh (not 50%) to match the peephole/#calib-target's off-center
-     position below — all three have to agree or the crosshair drifts off
-     the peephole/bullseye's actual center. */
+  /* Must match the peephole/#calib-target's center below (same
+     100vh - 440px - 19vmin expression) or the crosshair drifts off the
+     peephole/bullseye's actual center. */
   #center-reticle {
-    position: fixed; z-index: 16; left: 50%; top: 38vh;
+    position: fixed; z-index: 16; left: 50%; top: calc(100vh - 440px - 19vmin);
     width: 18px; height: 18px; margin: -9px 0 0 -9px;
     pointer-events: none; opacity: 0;
   }
@@ -162,14 +167,17 @@
   #calibrate-overlay.show { display: flex; }
 
   /* Fixed aiming bullseye: shown over the live camera feed while
-     calibrating, at the peephole's center (38vh, not true 50% — has to
-     match #three-canvas.peephole/#peephole-ring/#center-reticle above, or
-     it drifts off the peephole's actual center) so the presenter aims the
-     phone at the real whiteboard through it. Off-center vertically so it
-     — and the peephole rectangle around it — never overlaps
-     #calibrate-card, which is anchored to the bottom of the screen. */
+     calibrating, at the peephole's center (has to match
+     #three-canvas.peephole/#peephole-ring/#center-reticle above, or it
+     drifts off the peephole's actual center) so the presenter aims the
+     phone at the real whiteboard through it. Anchored via the same
+     bottom-relative math as the peephole so it — and the rectangle
+     around it — keeps a consistent gap above #calibrate-card regardless
+     of device screen height (see the long comment on
+     #three-canvas.peephole for why top-relative positioning wasn't
+     enough). */
   #calib-target {
-    position: absolute; left: 50%; top: 38vh; transform: translate(-50%, -50%);
+    position: absolute; left: 50%; top: calc(100vh - 440px - 19vmin); transform: translate(-50%, -50%);
     width: min(46vw, 260px); aspect-ratio: 1 / 1;
     pointer-events: none;
   }
