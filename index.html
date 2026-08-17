@@ -183,6 +183,28 @@
     transition: opacity 0.15s;
   }
   #calibrate-btn:disabled { opacity: 0.6; cursor: default; }
+  #calibrate-manual-link {
+    display: none; background: none; border: none; color: #93c5fd;
+    font-size: 12.5px; margin-top: 12px; text-decoration: underline;
+    cursor: pointer; padding: 4px; pointer-events: auto;
+  }
+
+  /* ---------- Auto-detect corner box ---------- */
+  /* Percent-based viewBox (0-100) so polygon points can be set directly as
+     viewport percentages from videoNormToViewportPercent() — no further
+     unit conversion needed between detection math and screen pixels. */
+  #corner-box-svg {
+    position: fixed; inset: 0; width: 100%; height: 100%;
+    z-index: 17; pointer-events: none; display: none;
+  }
+  #corner-box-poly {
+    fill: rgba(59,130,246,0.14);
+    stroke: #3b82f6; stroke-width: 0.6;
+    transition: stroke 0.2s, fill 0.2s, stroke-width 0.2s;
+  }
+  #corner-box-poly.locked {
+    stroke: #22c55e; fill: rgba(34,197,94,0.2); stroke-width: 0.9;
+  }
   /* ---------- Reveal fanfare: sparkle-wipe canvas ---------- */
   #fx-canvas {
     position: fixed; inset: 0; z-index: 45; pointer-events: none;
@@ -329,18 +351,29 @@
 
 <!-- Calibration overlay: aligns the panorama's "front" to a real wall in the room -->
 <div id="calibrate-overlay">
-  <div id="calib-target">
+  <!-- Manual-mode aiming bullseye — hidden unless auto-detect isn't found/used,
+       see resetCalibrationUI() / fallbackToManual(). -->
+  <div id="calib-target" style="display:none">
     <svg class="bullseye" viewBox="0 0 100 100" fill="none">
       <circle cx="50" cy="50" r="42" stroke="#3b82f6" stroke-width="4"/>
       <circle cx="50" cy="50" r="24" stroke="#3b82f6" stroke-width="4"/>
       <circle cx="50" cy="50" r="5" fill="#3b82f6"/>
     </svg>
   </div>
+
+  <!-- Auto-detect corner box: polygon points are set live, every detection
+       tick, to the whiteboard quad found in the current camera frame — see
+       startAutoDetect() / detectQuad(). -->
+  <svg id="corner-box-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+    <polygon id="corner-box-poly" points=""/>
+  </svg>
+
   <div id="calibrate-card">
     <div class="icon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></div>
-    <h2>Calibrate Direction</h2>
-    <p id="calibrate-card-text">Hold your phone still, aimed at the center of the whiteboard on the front wall — then tap Calibrate.</p>
-    <button id="calibrate-btn">Calibrate</button>
+    <h2 id="calibrate-card-heading">Calibrate Direction</h2>
+    <p id="calibrate-card-text">Point your phone at the whiteboard in the center of the room.</p>
+    <button id="calibrate-btn">Begin Calibration</button>
+    <button id="calibrate-manual-link">Calibrate manually instead</button>
   </div>
 </div>
 
@@ -405,7 +438,7 @@ import * as THREE from "three";
    ============================================================ */
 
 const state = {
-  revealed: false,        // stays false until calibration locks in — see runCalibration()
+  revealed: false,        // stays false until calibration locks in — see commitCalibration()
   revealFactor: 0,       // smoothed 0..1, drives the crossfade toggle transition
   showStuds: false,
   showElectrical: false,
@@ -783,7 +816,7 @@ startBtn.addEventListener("click", async () => {
     // to appear immediately, sitting directly behind the calibration card
     // for the entire calibrate flow and colliding with it. It's
     // meaningless before calibration anyway (nothing's revealed yet), so
-    // it only shows once runCalibration() actually commits.
+    // it only shows once commitCalibration() actually commits.
 
     // The X-ray reveal stays off (state.revealed starts false) until the
     // presenter explicitly taps Calibrate, even without a compass — that
@@ -971,17 +1004,80 @@ function fireSparkleWipe(onComplete) {
   requestAnimationFrame(frame);
 }
 
-// Single-tap calibration: point at the whiteboard, tap Calibrate, done.
-// (Previously a two-phase point-then-drag-to-confirm flow, dropped now
-// that the pano is pre-aimed at the whiteboard via PANO_YAW_OFFSET and
-// doesn't need a manual nudge — see NEXT-UP.md for how to bring it back
-// if single-tap turns out too imprecise in practice.) Re-callable via the
-// recalibrate icon.
+// Calibration: default flow is automatic — point at the whiteboard, tap
+// "Begin Calibration", and computer-vision corner detection (OpenCV.js,
+// lazy-loaded on first use — see loadOpenCv()) finds the whiteboard's 4
+// corners the way a check-scanning app finds a check, highlights it, and
+// commits once the detection has held steady for a beat. Falls back to a
+// single-tap manual flow (aim + tap, no drag/confirm step needed since the
+// pano is pre-aimed at the whiteboard via PANO_YAW_OFFSET) if detection
+// can't load or doesn't find anything within AUTO_DETECT_TIMEOUT_MS, or if
+// the presenter taps "Calibrate manually instead". Re-callable via the
+// recalibrate icon, which always resets back to the automatic flow.
 const calibrateBtn = document.getElementById("calibrate-btn");
 const calibrateCardText = document.getElementById("calibrate-card-text");
+const calibrateCardHeading = document.getElementById("calibrate-card-heading");
 const calibrateCard = document.getElementById("calibrate-card");
+const calibrateManualLink = document.getElementById("calibrate-manual-link");
+const calibTarget = document.getElementById("calib-target");
+const cornerBoxSvg = document.getElementById("corner-box-svg");
+const cornerBoxPoly = document.getElementById("corner-box-poly");
 
-function runCalibration() {
+const DEFAULT_CALIBRATE_TEXT = "Point your phone at the whiteboard in the center of the room.";
+const MANUAL_CALIBRATE_TEXT = "Hold your phone still, aimed at the center of the whiteboard on the front wall — then tap Calibrate.";
+
+// Applies whatever yaw/pitch trim was already computed (0,0 for the plain
+// manual tap) and runs the shared reveal: close the overlay, show the
+// category pills, fire the fanfare, then the look-hint once it clears.
+function commitCalibration(extraYawTrim, extraPitchTrim) {
+  recalibrateHeading(); // resets yawTrim/pitchTrim to 0, then we layer on any detected correction
+  state.yawTrim = extraYawTrim || 0;
+  state.pitchTrim = extraPitchTrim || 0;
+  state.revealed = true;
+  document.getElementById("calibrate-overlay").classList.remove("show");
+  document.getElementById("labels-wrap").classList.add("show");
+  // The look-hint (icon + "Pan & tilt...") sits dead-center on screen —
+  // exactly where the peephole reveal is — so it's held back until the
+  // fanfare has actually cleared instead of stepping on the reveal.
+  fireSparkleWipe(() => {
+    document.getElementById("look-hint").classList.add("show");
+    state.hintTimer = setTimeout(hideLookHint, 5000);
+  });
+}
+
+function resetCalibrationUI() {
+  if (autoDetectHandle) { autoDetectHandle.cancelled = true; autoDetectHandle = null; }
+  calibTarget.style.display = "none";
+  cornerBoxSvg.style.display = "none";
+  cornerBoxPoly.classList.remove("locked");
+  calibrateCardHeading.style.display = "";
+  calibrateCard.querySelector(".icon").style.display = "";
+  calibrateManualLink.style.display = "none";
+  calibrateCardHeading.textContent = "Calibrate Direction";
+  calibrateCardText.textContent = DEFAULT_CALIBRATE_TEXT;
+  calibrateBtn.style.display = "";
+  calibrateBtn.textContent = "Begin Calibration";
+  calibrateBtn.disabled = false;
+  calibrateBtn.onclick = startAutoDetect;
+}
+
+function switchToManual(reasonText) {
+  if (autoDetectHandle) { autoDetectHandle.cancelled = true; autoDetectHandle = null; }
+  cornerBoxSvg.style.display = "none";
+  cornerBoxPoly.classList.remove("locked");
+  calibrateManualLink.style.display = "none";
+  calibrateCardHeading.style.display = "";
+  calibrateCard.querySelector(".icon").style.display = "";
+  calibrateCardHeading.textContent = "Calibrate Direction";
+  calibrateCardText.textContent = reasonText || MANUAL_CALIBRATE_TEXT;
+  calibrateBtn.style.display = "";
+  calibrateBtn.textContent = "Calibrate";
+  calibrateBtn.disabled = false;
+  calibrateBtn.onclick = runManualCalibration;
+  calibTarget.style.display = "";
+}
+
+function runManualCalibration() {
   // Tapping a button at the bottom of the screen with your thumb, while
   // holding the phone up in aiming position, reliably nudges the phone's
   // aim right at the moment of the tap — so capturing the heading/pitch
@@ -990,32 +1086,248 @@ function runCalibration() {
   calibrateBtn.disabled = true;
   calibrateBtn.textContent = "Hold still…";
   setTimeout(() => {
-    recalibrateHeading();
-    state.revealed = true;
-    document.getElementById("calibrate-overlay").classList.remove("show");
-    document.getElementById("labels-wrap").classList.add("show");
-    // The look-hint (icon + "Pan & tilt...") sits dead-center on screen —
-    // exactly where the peephole reveal is — so it's held back until the
-    // fanfare has actually cleared instead of stepping on the reveal.
-    fireSparkleWipe(() => {
-      document.getElementById("look-hint").classList.add("show");
-      state.hintTimer = setTimeout(hideLookHint, 5000);
-    });
+    commitCalibration(0, 0);
     calibrateBtn.disabled = false;
     calibrateBtn.textContent = "Calibrate";
   }, 500);
 }
 
-document.getElementById("calibrate-btn").addEventListener("click", runCalibration);
+/* ---------------- Auto corner-detection (OpenCV.js) ---------------- */
+// Lazy-loaded only when calibration is actually attempted — not on page
+// load — since it's a ~10MB library and most of the class just needs the
+// page to load fast off a QR code.
+let cvReadyPromise = null;
+function loadOpenCv() {
+  if (cvReadyPromise) return cvReadyPromise;
+  cvReadyPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = "opencv.js";
+    script.onload = () => {
+      if (window.cv && window.cv.getBuildInformation) { resolve(window.cv); return; }
+      window.cv["onRuntimeInitialized"] = () => resolve(window.cv);
+    };
+    script.onerror = () => reject(new Error("opencv.js failed to load"));
+    document.head.appendChild(script);
+  });
+  return cvReadyPromise;
+}
+
+const AUTO_DETECT_TIMEOUT_MS = 15000;
+const STABILITY_FRAMES_REQUIRED = 6;
+// Max fractional (of processing-frame width/height) corner movement between
+// consecutive detections to still count as "the same, held-steady quad".
+// Untested against real handheld footage (validated the detection math
+// itself against real photos, not live video) — may need loosening if
+// natural hand tremor keeps resetting the stability counter in practice.
+const STABILITY_TOLERANCE = 0.035;
+const DETECT_INTERVAL_MS = 160; // ~6fps — plenty for a mostly-static aim-and-hold gesture
+const PROC_WIDTH = 480; // downscaled processing frame width, matches what was validated
+
+let autoDetectHandle = null;
+
+// Sorts 4 points into consistent rotational order around their centroid, so
+// frame-to-frame stability comparison and polygon drawing aren't thrown off
+// by approxPolyDP starting at a different corner each time.
+function orderCorners(pts) {
+  const cx = pts.reduce((s, p) => s + p.x, 0) / 4;
+  const cy = pts.reduce((s, p) => s + p.y, 0) / 4;
+  return pts.slice().sort((a, b) => Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+}
+
+// Runs one detection pass against the current video frame. Returns 4
+// corners normalized to [0,1] within the video's own frame, or null.
+// Pipeline validated against real photos of this room's whiteboard (see
+// project notes): convex hull before approxPolyDP is what makes this work
+// at all — glare and the whiteboard's internal seam line otherwise break
+// its contour into 5-7 points, never a clean quad. The aspect-ratio window
+// (not raw area) is what correctly picks the whiteboard alone over the
+// whole wall span (whiteboard + both flanking screens merged into one
+// larger, still fairly-rectangular blob) — area is used only as a floor.
+function detectQuad(cv, video, proc, pctx) {
+  if (!video.videoWidth) return null;
+  pctx.drawImage(video, 0, 0, proc.width, proc.height);
+  let src, gray, blurred, edges, dilated, kernel, contours, hierarchy;
+  try {
+    src = cv.imread(proc);
+    gray = new cv.Mat();
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    blurred = new cv.Mat();
+    cv.GaussianBlur(gray, blurred, new cv.Size(5, 5), 0);
+    edges = new cv.Mat();
+    cv.Canny(blurred, edges, 40, 120);
+    dilated = new cv.Mat();
+    kernel = cv.Mat.ones(3, 3, cv.CV_8U);
+    cv.dilate(edges, dilated, kernel);
+    contours = new cv.MatVector();
+    hierarchy = new cv.Mat();
+    cv.findContours(dilated, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+
+    const frameArea = proc.width * proc.height;
+    let best = null;
+    for (let i = 0; i < contours.size(); i++) {
+      const cnt = contours.get(i);
+      const hull = new cv.Mat();
+      cv.convexHull(cnt, hull);
+      const peri = cv.arcLength(hull, true);
+      for (const eps of [0.02, 0.03, 0.04, 0.05]) {
+        const approx = new cv.Mat();
+        cv.approxPolyDP(hull, approx, eps * peri, true);
+        if (approx.rows === 4) {
+          const area = Math.abs(cv.contourArea(approx));
+          const areaFrac = area / frameArea;
+          if (areaFrac > 0.08) {
+            const pts = [];
+            for (let j = 0; j < 4; j++) pts.push({ x: approx.data32S[j * 2], y: approx.data32S[j * 2 + 1] });
+            const cx = pts.reduce((s, p) => s + p.x, 0) / 4, cy = pts.reduce((s, p) => s + p.y, 0) / 4;
+            const centerDist = Math.hypot(cx - proc.width / 2, cy - proc.height / 2) / proc.width;
+            let maxAngleDev = 0;
+            for (let k = 0; k < 4; k++) {
+              const p0 = pts[(k + 3) % 4], p1 = pts[k], p2 = pts[(k + 1) % 4];
+              const v1 = { x: p0.x - p1.x, y: p0.y - p1.y }, v2 = { x: p2.x - p1.x, y: p2.y - p1.y };
+              const dot = v1.x * v2.x + v1.y * v2.y;
+              const mag = Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y);
+              const angle = Math.acos(Math.max(-1, Math.min(1, dot / mag))) * 180 / Math.PI;
+              maxAngleDev = Math.max(maxAngleDev, Math.abs(angle - 90));
+            }
+            const w1 = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+            const w2 = Math.hypot(pts[2].x - pts[3].x, pts[2].y - pts[3].y);
+            const h1 = Math.hypot(pts[3].x - pts[0].x, pts[3].y - pts[0].y);
+            const h2 = Math.hypot(pts[2].x - pts[1].x, pts[2].y - pts[1].y);
+            let ratio = ((w1 + w2) / 2) / ((h1 + h2) / 2);
+            if (ratio < 1) ratio = 1 / ratio; // point winding direction is arbitrary
+            // Known prior: this room's whiteboard is roughly 1.65:1.
+            if (ratio >= 1.15 && ratio <= 2.1) {
+              const aspectDev = Math.abs(ratio - 1.65);
+              const score = -centerDist * 2 - maxAngleDev * 0.05 - aspectDev;
+              if (!best || score > best.score) {
+                best = { score, pts: pts.map((p) => ({ x: p.x / proc.width, y: p.y / proc.height })) };
+              }
+            }
+            approx.delete();
+            break;
+          }
+        }
+        approx.delete();
+      }
+      hull.delete();
+      cnt.delete();
+    }
+    return best ? orderCorners(best.pts) : null;
+  } finally {
+    [src, gray, blurred, edges, dilated, kernel, hierarchy].forEach((m) => m && m.delete());
+    if (contours) contours.delete();
+  }
+}
+
+function quadsAreClose(a, b, tol) {
+  for (let i = 0; i < 4; i++) {
+    if (Math.abs(a[i].x - b[i].x) > tol || Math.abs(a[i].y - b[i].y) > tol) return false;
+  }
+  return true;
+}
+
+// Video is shown via CSS object-fit:cover, which crops rather than letterboxes
+// — this maps a point normalized within the *video's own* frame to a percent
+// position within the *visible, on-screen* (cropped) area, matching that CSS.
+function videoNormToViewportPercent(nx, ny, video) {
+  const videoAR = video.videoWidth / video.videoHeight;
+  const viewAR = window.innerWidth / window.innerHeight;
+  let sx, sy, sw, sh;
+  if (videoAR > viewAR) { sh = 1; sw = viewAR / videoAR; sx = (1 - sw) / 2; sy = 0; }
+  else { sw = 1; sh = videoAR / viewAR; sy = (1 - sh) / 2; sx = 0; }
+  return { x: ((nx - sx) / sw) * 100, y: ((ny - sy) / sh) * 100 };
+}
+
+async function startAutoDetect() {
+  calibrateBtn.disabled = true;
+  calibrateBtn.textContent = "Loading…";
+  let cv;
+  try {
+    cv = await loadOpenCv();
+  } catch (e) {
+    switchToManual("Couldn't load corner detection — hold your phone still, aimed at the center of the whiteboard on the front wall, then tap Calibrate.");
+    return;
+  }
+
+  calibrateCardHeading.style.display = "none";
+  calibrateCard.querySelector(".icon").style.display = "none";
+  calibrateBtn.style.display = "none";
+  calibrateManualLink.style.display = "block";
+  calibrateCardText.textContent = "Looking for the whiteboard…";
+  cornerBoxSvg.style.display = "block";
+
+  const video = document.getElementById("camera-feed");
+  const proc = document.createElement("canvas");
+  proc.width = PROC_WIDTH;
+  proc.height = Math.round(PROC_WIDTH * ((video.videoHeight / video.videoWidth) || 0.75));
+  const pctx = proc.getContext("2d", { willReadFrequently: true });
+
+  let stableCount = 0;
+  let lastQuad = null;
+  let locked = false;
+  const startedAt = performance.now();
+  const handle = { cancelled: false, timer: null };
+  autoDetectHandle = handle;
+
+  function tick() {
+    if (handle.cancelled) return;
+    if (performance.now() - startedAt > AUTO_DETECT_TIMEOUT_MS) {
+      switchToManual("Having trouble finding the whiteboard automatically — hold your phone still, aimed at its center, then tap Calibrate.");
+      return;
+    }
+    const quad = detectQuad(cv, video, proc, pctx);
+    if (quad) {
+      const screenPts = quad.map((p) => videoNormToViewportPercent(p.x, p.y, video));
+      cornerBoxPoly.setAttribute("points", screenPts.map((p) => `${p.x},${p.y}`).join(" "));
+
+      if (lastQuad && quadsAreClose(quad, lastQuad, STABILITY_TOLERANCE)) stableCount++;
+      else stableCount = 1;
+      lastQuad = quad;
+
+      if (stableCount >= STABILITY_FRAMES_REQUIRED && !locked) {
+        locked = true;
+        cornerBoxPoly.classList.add("locked");
+        const cx = screenPts.reduce((s, p) => s + p.x, 0) / 4;
+        const cy = screenPts.reduce((s, p) => s + p.y, 0) / 4;
+        // Brief hold so the "locked" highlight is actually visible before
+        // the fanfare takes over — matches the old confirm-step's beat.
+        handle.timer = setTimeout(() => finishAutoDetect(cx, cy), 550);
+        return;
+      }
+    } else {
+      stableCount = Math.max(0, stableCount - 1);
+      if (stableCount === 0) lastQuad = null;
+    }
+    handle.timer = setTimeout(tick, DETECT_INTERVAL_MS);
+  }
+  tick();
+}
+
+function finishAutoDetect(cxPercent, cyPercent) {
+  autoDetectHandle = null;
+  const cxPx = (cxPercent / 100) * window.innerWidth;
+  const cyPx = (cyPercent / 100) * window.innerHeight;
+  // Same correction a manual drag-to-center would apply, reusing the exact
+  // trim constant already validated by the drag-fallback handler (see
+  // setupDragFallback) rather than deriving new FOV/perspective math.
+  const dx = window.innerWidth / 2 - cxPx;
+  const dy = window.innerHeight / 2 - cyPx;
+  cornerBoxSvg.style.display = "none";
+  cornerBoxPoly.classList.remove("locked");
+  commitCalibration(-dx * 0.0045, -dy * 0.0045);
+}
+
+calibrateManualLink.addEventListener("click", () => switchToManual());
 document.getElementById("recalibrate-btn").addEventListener("click", () => {
   // Re-aiming hides the reveal again until the next confirmed calibration,
   // so the "wipe" fanfare always means the same thing: calibration was
   // just confirmed, not just guessed at.
   state.revealed = false;
-  calibrateBtn.textContent = "Calibrate";
   document.getElementById("labels-wrap").classList.remove("show");
+  resetCalibrationUI();
   document.getElementById("calibrate-overlay").classList.add("show");
 });
+resetCalibrationUI();
 
 document.getElementById("motion-banner-close").addEventListener("click", () => {
   document.getElementById("motion-banner").classList.remove("show");
