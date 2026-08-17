@@ -30,20 +30,27 @@
     position: fixed; inset: 0; width: 100%; height: 100%;
     z-index: 1; touch-action: none;
   }
-  /* Peephole mode: a centered rectangle shows the x-ray layer with a crisp
-     cutoff — rest of the canvas is clipped to transparent. Sized via calc()
-     off both viewport axes independently (not vmin alone) so the box stays
-     a fixed WxH rectangle rather than going elliptical/distorted across
-     viewport aspects. The edge itself reads via #peephole-ring below. */
+  /* Peephole mode: a rectangle shows the x-ray layer with a crisp cutoff —
+     rest of the canvas is clipped to transparent. Vertically off-center
+     (38vh, not 50%) so it never overlaps #calibrate-card, which is
+     anchored to the bottom of the screen — it used to sit dead-center and
+     visibly collide with the card. Insets are hardcoded numbers, not
+     calc() off CSS custom properties — Safari has a real, documented bug
+     failing to resolve var() inside clip-path/-webkit-clip-path; the
+     symptom is exactly what showed up on-device (content squashed into a
+     thin sliver) despite #peephole-ring, which uses the same numbers
+     directly with no custom properties, rendering at full correct size.
+     Width/height must be kept in sync by hand across this block, this
+     block's clip-path, and #peephole-ring below (all three duplicate the
+     same 78vmin/46vmin/38vh numbers) — that duplication is the tradeoff
+     for sidestepping the Safari bug. */
   #three-canvas.peephole {
-    --peephole-w: 88vmin;
-    --peephole-h: 60vmin;
-    -webkit-clip-path: inset(calc((100vh - var(--peephole-h)) / 2) calc((100vw - var(--peephole-w)) / 2) round 20px);
-    clip-path: inset(calc((100vh - var(--peephole-h)) / 2) calc((100vw - var(--peephole-w)) / 2) round 20px);
+    -webkit-clip-path: inset(calc(38vh - 23vmin) calc((100vw - 78vmin) / 2) calc(62vh - 23vmin) calc((100vw - 78vmin) / 2) round 20px);
+    clip-path: inset(calc(38vh - 23vmin) calc((100vw - 78vmin) / 2) calc(62vh - 23vmin) calc((100vw - 78vmin) / 2) round 20px);
   }
   #peephole-ring {
-    position: fixed; z-index: 16; left: 50%; top: 50%;
-    width: 88vmin; height: 60vmin; margin: -30vmin 0 0 -44vmin;
+    position: fixed; z-index: 16; left: 50%; top: 38vh;
+    width: 78vmin; height: 46vmin; margin: -23vmin 0 0 -39vmin;
     border-radius: 20px; pointer-events: none; display: none;
     border: 1.5px solid rgba(147,197,253,0.8);
     box-shadow: 0 0 10px rgba(59,130,246,0.4), inset 0 0 10px rgba(59,130,246,0.25);
@@ -124,8 +131,11 @@
 
 
   /* ---------- Center reticle: aiming aid ---------- */
+  /* top:38vh (not 50%) to match the peephole/#calib-target's off-center
+     position below — all three have to agree or the crosshair drifts off
+     the peephole/bullseye's actual center. */
   #center-reticle {
-    position: fixed; z-index: 16; left: 50%; top: 50%;
+    position: fixed; z-index: 16; left: 50%; top: 38vh;
     width: 18px; height: 18px; margin: -9px 0 0 -9px;
     pointer-events: none; opacity: 0;
   }
@@ -151,16 +161,15 @@
   }
   #calibrate-overlay.show { display: flex; }
 
-  /* Fixed aiming bullseye: shown at true screen-center over the live camera
-     feed while calibrating. The presenter keeps the phone physically aimed
-     so this sits on the real whiteboard; the 3D pink bullseye (which moves
-     with drag) is the thing that gets aligned onto it — two concentric
-     targets merging into one reads unambiguously as "line these up",
-     unlike the old dashed-rectangle framing this replaced. True center
-     (not an offset position) since the 3D marker also always renders at
-     true screen center — no residual gap between the two. */
+  /* Fixed aiming bullseye: shown over the live camera feed while
+     calibrating, at the peephole's center (38vh, not true 50% — has to
+     match #three-canvas.peephole/#peephole-ring/#center-reticle above, or
+     it drifts off the peephole's actual center) so the presenter aims the
+     phone at the real whiteboard through it. Off-center vertically so it
+     — and the peephole rectangle around it — never overlaps
+     #calibrate-card, which is anchored to the bottom of the screen. */
   #calib-target {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    position: absolute; left: 50%; top: 38vh; transform: translate(-50%, -50%);
     width: min(46vw, 260px); aspect-ratio: 1 / 1;
     pointer-events: none;
   }
