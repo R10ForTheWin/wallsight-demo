@@ -276,6 +276,28 @@
     0%, 100% { transform: rotate(-14deg); }
     50% { transform: rotate(14deg); }
   }
+
+  /* ---------- Landscape guard ---------- */
+  /* Pure CSS, not JS-driven: pitch is read straight off e.beta with no
+     per-orientation correction (see onDeviceOrientation), so in landscape
+     beta/gamma swap physical meaning and pan/tilt tracks the wrong axis —
+     tilting the phone up/down would do nothing, rolling it would move the
+     reveal. Rather than handle both orientations, just block landscape
+     outright; a media query means this covers every screen (start,
+     calibrate, revealed) automatically, with no JS state to keep in sync. */
+  #rotate-overlay { display: none; }
+  @media (orientation: landscape) {
+    #rotate-overlay {
+      display: flex; position: fixed; inset: 0; z-index: 100;
+      flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; text-align: center; padding: 32px;
+      background: radial-gradient(120% 120% at 50% 0%, #16305c 0%, #081326 60%, #04070d 100%);
+      color: #fff;
+    }
+  }
+  #rotate-overlay svg { width: 52px; height: 52px; animation: sway 1.6s ease-in-out infinite; }
+  #rotate-overlay h2 { font-size: 19px; margin: 0; font-weight: 700; }
+  #rotate-overlay p { font-size: 14px; color: #b9c6de; max-width: 280px; line-height: 1.5; margin: 0; }
 </style>
 </head>
 <body>
@@ -283,6 +305,19 @@
 <!-- Camera feed sits behind the WebGL canvas -->
 <video id="camera-feed" autoplay playsinline muted></video>
 <canvas id="three-canvas"></canvas>
+
+<!-- Landscape guard: shown/hidden purely by the CSS media query above,
+     covers every screen (start/calibrate/revealed) with no JS needed. -->
+<div id="rotate-overlay">
+  <svg viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="7" y="2" width="10" height="20" rx="2.5" transform="rotate(90 12 12)"/>
+    <line x1="12" y1="18" x2="12" y2="18.01" transform="rotate(90 12 12)"/>
+    <path d="M4 8a8 8 0 0 1 13-4"/>
+    <path d="M17 1v4h-4"/>
+  </svg>
+  <h2>Rotate to Portrait</h2>
+  <p>WallSight only works held upright — rotate your phone back to portrait to continue.</p>
+</div>
 
 <!-- Top bar -->
 <div id="top-bar">
