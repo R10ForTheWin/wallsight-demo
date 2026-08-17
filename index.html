@@ -173,18 +173,16 @@
      real, reported bug (crosshair visibly off the peephole's actual
      center), not a theoretical one. 440px+19vmin is the ring's own
      center-from-bottom (bottom:440px, half of its 38vmin height); minus
-     9px (half this element's fixed 18px height) so bottom-edge
-     positioning lands the CENTER, not the edge, on that point. */
+     14px (half this element's fixed 28px size) so bottom-edge
+     positioning lands the CENTER, not the edge, on that point. Same
+     scope-reticle SVG that used to sit above "Calibrate" on the card —
+     moved here instead of duplicated as a separate design, so it reads as
+     one aiming aid used in two places rather than two different marks. */
   #center-reticle {
-    position: fixed; z-index: 16; left: 50%; bottom: calc(440px + 19vmin - 9px);
-    width: 18px; height: 18px; margin: 0 0 0 -9px;
+    position: fixed; z-index: 16; left: 50%; bottom: calc(440px + 19vmin - 14px);
+    width: 28px; height: 28px; margin: 0 0 0 -14px;
     pointer-events: none; opacity: 0;
   }
-  #center-reticle::before, #center-reticle::after {
-    content: ""; position: absolute; background: #fff; border-radius: 1px;
-  }
-  #center-reticle::before { left: 8px; top: 0; width: 2px; height: 18px; }
-  #center-reticle::after { left: 0; top: 8px; width: 18px; height: 2px; }
 
 
   /* ---------- Calibration overlay ---------- */
@@ -228,7 +226,6 @@
     box-shadow: 0 12px 40px rgba(0,0,0,0.45);
     pointer-events: auto;
   }
-  #calibrate-card .icon { font-size: 30px; margin-bottom: 8px; }
   #calibrate-card h2 { font-size: 17px; margin: 0 0 8px; font-weight: 700; }
   #calibrate-card p { font-size: 13.5px; color: #b9c6de; line-height: 1.5; margin: 0 0 18px; }
   #calibrate-btn {
@@ -401,7 +398,7 @@
 
 
 <!-- Faint center reticle: aiming aid for the peephole and for manual trim -->
-<div id="center-reticle"></div>
+<div id="center-reticle"><svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></div>
 <div id="peephole-ring-rect"></div>
 <div id="peephole-ring-circle"></div>
 
@@ -429,10 +426,9 @@
   </svg>
 
   <div id="calibrate-card">
-    <div class="icon"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></div>
-    <h2 id="calibrate-card-heading">Calibrate Direction</h2>
+    <h2 id="calibrate-card-heading">Calibrate</h2>
     <p id="calibrate-card-text">Aim your phone at the center of the whiteboard.</p>
-    <button id="calibrate-btn">Auto Detect Whiteboard</button>
+    <button id="calibrate-btn">Click here once centered</button>
     <button id="calibrate-manual-link">Calibrate manually instead</button>
   </div>
 </div>
@@ -1183,11 +1179,10 @@ function resetCalibrationUI() {
   cornerBoxSvg.style.display = "none";
   cornerBoxPoly.classList.remove("locked");
   calibrateCardHeading.style.display = "";
-  calibrateCard.querySelector(".icon").style.display = "";
-  calibrateCardHeading.textContent = "Calibrate Direction";
+  calibrateCardHeading.textContent = "Calibrate";
   calibrateCardText.textContent = AUTO_DETECT_TEXT;
   calibrateBtn.style.display = "";
-  calibrateBtn.textContent = "Auto Detect Whiteboard";
+  calibrateBtn.textContent = "Click here once centered";
   calibrateBtn.disabled = false;
   calibrateBtn.onclick = startAutoDetect;
   // No manual-calibration invite here — auto-detect is meant to just be
@@ -1208,11 +1203,10 @@ function switchToManual(reasonText) {
   cornerBoxSvg.style.display = "none";
   cornerBoxPoly.classList.remove("locked");
   calibrateCardHeading.style.display = "";
-  calibrateCard.querySelector(".icon").style.display = "";
-  calibrateCardHeading.textContent = "Calibrate Direction";
+  calibrateCardHeading.textContent = "Calibrate";
   calibrateCardText.textContent = reasonText || MANUAL_CALIBRATE_TEXT;
   calibrateBtn.style.display = "";
-  calibrateBtn.textContent = "Calibrate";
+  calibrateBtn.textContent = "Click here once centered";
   calibrateBtn.disabled = false;
   calibrateBtn.onclick = runManualCalibration;
   calibrateManualLink.style.display = "block";
@@ -1241,7 +1235,7 @@ function runManualCalibration() {
   setTimeout(() => {
     commitCalibration(0, 0);
     calibrateBtn.disabled = false;
-    calibrateBtn.textContent = "Calibrate";
+    calibrateBtn.textContent = "Click here once centered";
   }, 500);
 }
 
@@ -1316,7 +1310,6 @@ async function startAutoDetect() {
   // used to leave no way out at all except waiting, since this link only
   // appeared once the worker was already ready.
   calibrateCardHeading.style.display = "none";
-  calibrateCard.querySelector(".icon").style.display = "none";
   calibrateCardText.textContent = AUTO_DETECT_TEXT;
   calibrateManualLink.style.display = "block";
   calibrateManualLink.textContent = "Cancel";
