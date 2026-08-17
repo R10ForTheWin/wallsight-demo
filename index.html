@@ -1046,6 +1046,7 @@ function commitCalibration(extraYawTrim, extraPitchTrim) {
 }
 
 function resetCalibrationUI() {
+  calibrationGeneration++;
   if (autoDetectHandle) { autoDetectHandle.cancelled = true; autoDetectHandle = null; }
   calibTarget.style.display = "none";
   cornerBoxSvg.style.display = "none";
@@ -1062,6 +1063,7 @@ function resetCalibrationUI() {
 }
 
 function switchToManual(reasonText) {
+  calibrationGeneration++;
   if (autoDetectHandle) { autoDetectHandle.cancelled = true; autoDetectHandle = null; }
   cornerBoxSvg.style.display = "none";
   cornerBoxPoly.classList.remove("locked");
@@ -1103,14 +1105,38 @@ function loadOpenCv() {
     const script = document.createElement("script");
     script.src = "opencv.js";
     script.onload = () => {
-      if (window.cv && window.cv.getBuildInformation) { resolve(window.cv); return; }
-      window.cv["onRuntimeInitialized"] = () => resolve(window.cv);
+      // Belt-and-suspenders readiness check: rely on onRuntimeInitialized
+      // firing, but also poll for cv.getBuildInformation actually being
+      // callable (what a resolved module looks like) in case that
+      // callback never fires on some browser/build combination — a
+      // callback that silently never fires would otherwise hang this
+      // Promise forever with nothing to catch it.
+      if (window.cv) window.cv["onRuntimeInitialized"] = () => resolve(window.cv);
+      const pollStart = performance.now();
+      const poll = () => {
+        if (window.cv && typeof window.cv.getBuildInformation === "function") { resolve(window.cv); return; }
+        if (performance.now() - pollStart > 20000) return; // give up polling; the caller's own timeout (see startAutoDetect) is what actually surfaces this to the user
+        setTimeout(poll, 150);
+      };
+      poll();
     };
     script.onerror = () => reject(new Error("opencv.js failed to load"));
     document.head.appendChild(script);
   });
   return cvReadyPromise;
 }
+
+// Loading (or even just detecting) can hang or run long on a real phone —
+// slow WASM compile, flaky network, or the readiness callback above never
+// firing — with nothing else to catch it, so every await of a CV step in
+// startAutoDetect goes through this instead of a bare await.
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timed out")), ms)),
+  ]);
+}
+const OPENCV_LOAD_TIMEOUT_MS = 12000;
 
 const AUTO_DETECT_TIMEOUT_MS = 15000;
 const STABILITY_FRAMES_REQUIRED = 6;
@@ -1124,6 +1150,13 @@ const DETECT_INTERVAL_MS = 160; // ~6fps — plenty for a mostly-static aim-and-
 const PROC_WIDTH = 480; // downscaled processing frame width, matches what was validated
 
 let autoDetectHandle = null;
+// Bumped whenever calibration mode switches away from a given
+// startAutoDetect() run (manual link tapped mid-load, recalibrate, etc.) —
+// that run checks it right after its load-timeout await, since
+// handle.cancelled (below) doesn't exist yet at that point (the handle
+// isn't created until after loading finishes) and a stale continuation
+// would otherwise clobber whatever UI state the user already switched to.
+let calibrationGeneration = 0;
 
 // Sorts 4 points into consistent rotational order around their centroid, so
 // frame-to-frame stability comparison and polygon drawing aren't thrown off
@@ -1239,20 +1272,31 @@ function videoNormToViewportPercent(nx, ny, video) {
 }
 
 async function startAutoDetect() {
+  const myGeneration = ++calibrationGeneration;
   calibrateBtn.disabled = true;
   calibrateBtn.textContent = "Loading…";
-  let cv;
-  try {
-    cv = await loadOpenCv();
-  } catch (e) {
-    switchToManual("Couldn't load corner detection — hold your phone still, aimed at the center of the whiteboard on the front wall, then tap Calibrate.");
-    return;
-  }
-
+  // Shown immediately, not after loading succeeds — a slow/stuck load
+  // used to leave no way out at all except waiting, since this link only
+  // appeared once cv was already ready.
   calibrateCardHeading.style.display = "none";
   calibrateCard.querySelector(".icon").style.display = "none";
-  calibrateBtn.style.display = "none";
   calibrateManualLink.style.display = "block";
+
+  let cv;
+  try {
+    cv = await withTimeout(loadOpenCv(), OPENCV_LOAD_TIMEOUT_MS);
+  } catch (e) {
+    if (myGeneration === calibrationGeneration) {
+      switchToManual("Couldn't load corner detection in time — hold your phone still, aimed at the center of the whiteboard on the front wall, then tap Calibrate.");
+    }
+    return;
+  }
+  // The manual link (or recalibrate) may have been tapped while that load
+  // was still in flight — this continuation is stale, don't clobber
+  // whatever UI state the user already switched to.
+  if (myGeneration !== calibrationGeneration) return;
+
+  calibrateBtn.style.display = "none";
   calibrateCardText.textContent = "Looking for the whiteboard…";
   cornerBoxSvg.style.display = "block";
 
