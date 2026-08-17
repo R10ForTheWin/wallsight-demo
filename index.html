@@ -162,6 +162,13 @@
     display: none; align-items: center; justify-content: center;
   }
   #peephole-btn.show { display: flex; }
+  #exit-btn {
+    width: 30px; height: 30px; border-radius: 50%; font-size: 14px; line-height: 1;
+    background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14);
+    backdrop-filter: blur(6px); color: #fff; cursor: pointer;
+    display: none; align-items: center; justify-content: center;
+  }
+  #exit-btn.show { display: flex; }
   #peephole-btn.active { background: rgba(47,111,237,0.35); border-color: rgba(96,150,255,0.55); }
 
 
@@ -394,6 +401,7 @@
     <div id="calib-pill"></div>
     <button id="peephole-btn" title="Toggle peephole mode">⭕</button>
     <button id="recalibrate-btn" title="Recalibrate direction"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><line x1="12" y1="1" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="23"/><line x1="1" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="23" y2="12"/></svg></button>
+    <button id="exit-btn" title="Exit"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
   </div>
 </div>
 
@@ -916,6 +924,7 @@ startBtn.addEventListener("click", async () => {
     startScreen.style.display = "none";
     document.getElementById("recalibrate-btn").classList.add("show");
     document.getElementById("peephole-btn").classList.add("show");
+    document.getElementById("exit-btn").classList.add("show");
     // labels-wrap (category pills) intentionally NOT shown here — it used
     // to appear immediately, sitting directly behind the calibration card
     // for the entire calibrate flow and colliding with it. It's
@@ -1485,6 +1494,45 @@ document.getElementById("recalibrate-btn").addEventListener("click", () => {
   document.getElementById("calibrate-overlay").classList.add("show");
 });
 resetCalibrationUI();
+
+// Leaves the live view entirely: stops the camera stream (so the OS
+// recording indicator actually turns off, not just visually hidden) and
+// the motion listener, then returns to the start screen in a state
+// indistinguishable from a fresh page load — startBtn re-requests both
+// permissions and re-adds the listener from scratch, so nothing here can
+// be left half-torn-down for the next "Remove Wall" tap to trip over.
+document.getElementById("exit-btn").addEventListener("click", () => {
+  calibrationGeneration++;
+  cancelInFlightAutoDetect();
+  clearTimeout(state.hintTimer);
+  hideLookHint();
+  window.removeEventListener("deviceorientation", onDeviceOrientation);
+
+  const video = document.getElementById("camera-feed");
+  const stream = video.srcObject;
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  video.srcObject = null;
+
+  document.getElementById("calibrate-overlay").classList.remove("show");
+  document.getElementById("labels-wrap").classList.remove("show");
+  document.getElementById("motion-banner").classList.remove("show");
+  document.getElementById("recalibrate-btn").classList.remove("show");
+  document.getElementById("peephole-btn").classList.remove("show");
+  document.getElementById("exit-btn").classList.remove("show");
+  calibPill.textContent = "";
+  calibPill.style.background = "";
+  calibPill.style.borderColor = "";
+
+  state.revealed = false;
+  state.basePitch = null;
+  state.baseHeading = null;
+  setPeepholeShape("rect");
+
+  startBtn.disabled = false;
+  startBtn.textContent = "Remove Wall";
+  startError.textContent = "";
+  startScreen.style.display = "";
+});
 
 document.getElementById("motion-banner-close").addEventListener("click", () => {
   document.getElementById("motion-banner").classList.remove("show");
