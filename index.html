@@ -953,7 +953,13 @@ function fireSparkleWipe(onComplete) {
 
   const start = performance.now();
   function frame(now) {
-    const t = Math.min(1, (now - start) / duration);
+    // Clamped on BOTH ends — requestAnimationFrame's timestamp isn't
+    // guaranteed to be >= the performance.now() captured just before
+    // starting the loop (a real, confirmed gap, not theoretical: this
+    // produced negative t on the first frame, which fed a negative
+    // radius into ctx.arc() below and threw). Math.min(1, ...) alone
+    // only guarded the upper end.
+    const t = Math.max(0, Math.min(1, (now - start) / duration));
     fxCtx.clearRect(0, 0, W, H);
     fxCtx.save();
     fxCtx.globalCompositeOperation = "lighter";
@@ -1370,11 +1376,35 @@ document.getElementById("motion-retry-btn").addEventListener("click", async () =
 const centerReticle = document.getElementById("center-reticle");
 
 /* ---------------- Resize ---------------- */
+// Kept as a fast path for browsers that do fire it, but NOT relied on
+// alone — see syncRendererSize() below.
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
+
+// Safari's collapsing/expanding address bar changes the real viewport
+// height WITHOUT firing a 'resize' event — a known, documented gap, not
+// specific to this app. The peephole/clip-path CSS uses live 100vh, so it
+// tracks that change instantly; the WebGL renderer's internal buffer,
+// sized only in the resize handler above, would silently fall out of
+// sync — rendering into the OLD (often shorter) height while the peephole
+// clips to the NEW (taller) one, which reads as the revealed content
+// being squeezed into a smaller top-aligned band inside a
+// correctly-sized peephole. Cheap enough to just check every frame
+// instead of trying to catch every event that can cause it (visualViewport
+// resize, orientation change, keyboard show/hide, etc.).
+let lastSyncedWidth = window.innerWidth, lastSyncedHeight = window.innerHeight;
+function syncRendererSize() {
+  const w = window.innerWidth, h = window.innerHeight;
+  if (w !== lastSyncedWidth || h !== lastSyncedHeight) {
+    lastSyncedWidth = w; lastSyncedHeight = h;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, h);
+  }
+}
 
 /* ---------------- Render loop ---------------- */
 const SMOOTHING = 0.12;        // gyro feel: lower = smoother/laggier, higher = snappier
@@ -1382,6 +1412,7 @@ const REVEAL_SMOOTHING = 0.10; // toggle crossfade speed
 
 function animate() {
   requestAnimationFrame(animate);
+  syncRendererSize();
 
   // Sensor reading + manual trim are combined fresh every frame, so a drag
   // applies identically whether or not the compass is behaving.
