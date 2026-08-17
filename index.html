@@ -375,7 +375,7 @@
     <h2 id="calibrate-card-heading">Calibrate Direction</h2>
     <p id="calibrate-card-text">Point your phone at the whiteboard in the center of the room.</p>
     <button id="calibrate-btn">Begin Calibration</button>
-    <button id="calibrate-manual-link">Calibrate manually instead</button>
+    <button id="calibrate-manual-link">Cancel</button>
   </div>
 </div>
 
@@ -1104,6 +1104,19 @@ function switchToManual(reasonText) {
   calibTarget.style.display = "";
 }
 
+// Full abort, not a switch to manual — closes the overlay outright so a
+// stuck/broken attempt (either flow) always has a real way out. Re-open
+// via the recalibrate icon in the top bar, which is visible throughout
+// (set on the start flow, not gated behind a working calibration).
+function cancelCalibration() {
+  calibrationGeneration++;
+  if (autoDetectHandle) { autoDetectHandle.cancelled = true; autoDetectHandle = null; }
+  cornerBoxSvg.style.display = "none";
+  cornerBoxPoly.classList.remove("locked");
+  document.getElementById("calibrate-overlay").classList.remove("show");
+  resetCalibrationUI();
+}
+
 function runManualCalibration() {
   // Tapping a button at the bottom of the screen with your thumb, while
   // holding the phone up in aiming position, reliably nudges the phone's
@@ -1403,7 +1416,7 @@ function finishAutoDetect(cxPercent, cyPercent) {
   commitCalibration(-dx * 0.0045, -dy * 0.0045);
 }
 
-calibrateManualLink.addEventListener("click", () => switchToManual());
+calibrateManualLink.addEventListener("click", cancelCalibration);
 document.getElementById("recalibrate-btn").addEventListener("click", () => {
   // Re-aiming hides the reveal again until the next confirmed calibration,
   // so the "wipe" fanfare always means the same thing: calibration was
