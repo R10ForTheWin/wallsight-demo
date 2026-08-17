@@ -30,19 +30,21 @@
     position: fixed; inset: 0; width: 100%; height: 100%;
     z-index: 1; touch-action: none;
   }
-  /* Peephole mode: a circle at screen-center shows the x-ray layer with a
-     crisp cutoff (not a soft feather) — rest of the canvas is masked to
-     transparent. vmin-based radius keeps it a true circle regardless of
-     viewport aspect (percentage stops would go elliptical). The edge itself
-     reads via #peephole-ring below, not a gradient fade. */
+  /* Peephole mode: a centered rectangle shows the x-ray layer with a crisp
+     cutoff — rest of the canvas is clipped to transparent. Sized via calc()
+     off both viewport axes independently (not vmin alone) so the box stays
+     a fixed WxH rectangle rather than going elliptical/distorted across
+     viewport aspects. The edge itself reads via #peephole-ring below. */
   #three-canvas.peephole {
-    -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 0, #000 46vmin, transparent 46.4vmin);
-    mask-image: radial-gradient(circle at 50% 50%, #000 0, #000 46vmin, transparent 46.4vmin);
+    --peephole-w: 88vmin;
+    --peephole-h: 60vmin;
+    -webkit-clip-path: inset(calc((100vh - var(--peephole-h)) / 2) calc((100vw - var(--peephole-w)) / 2) round 20px);
+    clip-path: inset(calc((100vh - var(--peephole-h)) / 2) calc((100vw - var(--peephole-w)) / 2) round 20px);
   }
   #peephole-ring {
     position: fixed; z-index: 16; left: 50%; top: 50%;
-    width: 92vmin; height: 92vmin; margin: -46vmin 0 0 -46vmin;
-    border-radius: 50%; pointer-events: none; display: none;
+    width: 88vmin; height: 60vmin; margin: -30vmin 0 0 -44vmin;
+    border-radius: 20px; pointer-events: none; display: none;
     border: 1.5px solid rgba(147,197,253,0.8);
     box-shadow: 0 0 10px rgba(59,130,246,0.4), inset 0 0 10px rgba(59,130,246,0.25);
   }
@@ -1450,7 +1452,10 @@ function animate() {
   state.yaw += (state.targetYaw - state.yaw) * SMOOTHING;
   state.pitch += (state.targetPitch - state.pitch) * SMOOTHING;
   state.revealFactor += ((state.revealed ? 1 : 0) - state.revealFactor) * REVEAL_SMOOTHING;
-  centerReticle.style.opacity = state.revealFactor > 0.05 ? Math.min(1, state.revealFactor) * 0.55 : 0;
+  // Always visible (not gated to revealFactor) — it's an aiming aid for
+  // the peephole rectangle, useful during calibration too, not just once
+  // something's actually revealed.
+  centerReticle.style.opacity = 0.6;
 
   camera.rotation.order = "YXZ";
   camera.rotation.y = state.yaw;
