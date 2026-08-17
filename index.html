@@ -427,6 +427,29 @@
 <script type="module">
 import * as THREE from "three";
 
+/* ---------------- On-device debug surfacing ---------------- */
+// There's no console access on a phone in the field, so any uncaught error
+// (calibration, detection, or otherwise) gets shown directly on-screen via
+// the existing dev asset-banner instead of failing silently — the only way
+// to actually debug a report like "it's just not working" from a device
+// that isn't in front of me.
+function showDebugError(msg) {
+  const banner = document.getElementById("asset-banner");
+  const text = document.getElementById("asset-banner-text");
+  text.textContent = "DEBUG ERROR: " + msg;
+  banner.classList.add("show");
+}
+window.addEventListener("error", (e) => {
+  showDebugError(`${e.message} (${e.filename ? e.filename.split("/").pop() : "?"}:${e.lineno})`);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const reason = e.reason;
+  showDebugError("unhandled promise rejection: " + (reason && reason.message ? reason.message : String(reason)));
+});
+document.getElementById("asset-banner-close").addEventListener("click", () => {
+  document.getElementById("asset-banner").classList.remove("show");
+});
+
 /* ============================================================
    WallSight AR Demo — single equirectangular pano reveal layer
    - Live camera feed as page background
@@ -1313,13 +1336,30 @@ async function startAutoDetect() {
   const handle = { cancelled: false, timer: null };
   autoDetectHandle = handle;
 
+  let tickErrorCount = 0;
   function tick() {
     if (handle.cancelled) return;
     if (performance.now() - startedAt > AUTO_DETECT_TIMEOUT_MS) {
       switchToManual("Having trouble finding the whiteboard automatically — hold your phone still, aimed at its center, then tap Calibrate.");
       return;
     }
-    const quad = detectQuad(cv, video, proc, pctx);
+    let quad;
+    try {
+      quad = detectQuad(cv, video, proc, pctx);
+    } catch (e) {
+      // A single bad frame used to silently kill the whole loop — no more
+      // ticks would ever get scheduled, and the box would just sit there
+      // never updating, with nothing on screen to say why. Surface it and
+      // keep going instead; bail to manual only if it keeps failing.
+      tickErrorCount++;
+      showDebugError("corner detection: " + e.message + (tickErrorCount > 1 ? ` (x${tickErrorCount})` : ""));
+      if (tickErrorCount >= 5) {
+        switchToManual("Corner detection kept failing — hold your phone still, aimed at the whiteboard, then tap Calibrate.");
+        return;
+      }
+      handle.timer = setTimeout(tick, DETECT_INTERVAL_MS);
+      return;
+    }
     if (quad) {
       const screenPts = quad.map((p) => videoNormToViewportPercent(p.x, p.y, video));
       cornerBoxPoly.setAttribute("points", screenPts.map((p) => `${p.x},${p.y}`).join(" "));
