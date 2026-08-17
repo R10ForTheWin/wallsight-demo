@@ -100,29 +100,23 @@
     text-align: center; padding: 32px;
   }
   #start-screen .logo {
-    display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
+    display: flex; align-items: center; gap: 10px; margin-bottom: 56px;
   }
   #start-screen .logo img { width: 34px; height: 24px; }
   #start-screen .logo span {
     font-size: 22px; font-weight: 700; letter-spacing: 0.06em; color: #fff;
   }
   #start-screen h1 {
-    font-size: 26px; margin: 0 0 10px; font-weight: 700; max-width: 340px; line-height: 1.25;
-  }
-  #start-screen p {
-    font-size: 15px; color: #b9c6de; max-width: 320px; line-height: 1.5; margin: 0 0 28px;
+    font-size: 30px; margin: 0 0 36px; font-weight: 700; max-width: 300px; line-height: 1.28;
   }
   #start-btn {
     background: linear-gradient(135deg, #3b82f6, #2f6fed);
     color: #fff; border: none; border-radius: 999px;
-    padding: 16px 40px; font-size: 17px; font-weight: 600;
+    padding: 17px 44px; font-size: 17px; font-weight: 600;
     box-shadow: 0 8px 24px rgba(47,111,237,0.45);
     cursor: pointer;
   }
   #start-btn:active { transform: scale(0.97); }
-  #start-note {
-    margin-top: 16px; font-size: 12.5px; color: #7c8aa5; max-width: 300px;
-  }
   #start-error {
     margin-top: 16px; font-size: 13px; color: #fca5a5; max-width: 300px; display: none;
   }
@@ -480,7 +474,7 @@
     <img src="logo-icon.png" alt="" width="34" height="24">
     <span>WALLSIGHT</span>
   </div>
-  <h1>See What's Behind This Wall</h1>
+  <h1>See What's Behind Your Walls</h1>
   <button id="start-btn">Remove Wall</button>
   <div id="start-error"></div>
 </div>
@@ -1196,9 +1190,12 @@ function resetCalibrationUI() {
   calibrateBtn.textContent = "Auto Detect Whiteboard";
   calibrateBtn.disabled = false;
   calibrateBtn.onclick = startAutoDetect;
-  calibrateManualLink.style.display = "block";
-  calibrateManualLink.textContent = "Calibrate manually instead";
-  calibrateManualLink.onclick = () => switchToManual();
+  // No manual-calibration invite here — auto-detect is meant to just be
+  // tried first. If it can't find the whiteboard (worker load timeout,
+  // corner detection repeatedly failing, or scan timeout), switchToManual()
+  // still kicks in on its own and surfaces its own escape hatch there.
+  calibrateManualLink.style.display = "none";
+  calibrateManualLink.onclick = null;
 }
 
 // The fallback state: aim + tap, no detection involved. Reachable from
