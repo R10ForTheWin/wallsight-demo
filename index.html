@@ -72,8 +72,8 @@
     clip-path: inset(calc(100% - 440px - 38vmin) calc((100vw - 78vmin) / 2) 440px calc((100vw - 78vmin) / 2) round 20px);
   }
   #three-canvas.peephole-circle {
-    -webkit-clip-path: circle(46vmin at 50% 50%);
-    clip-path: circle(46vmin at 50% 50%);
+    -webkit-clip-path: circle(50vmin at 50% 50%);
+    clip-path: circle(50vmin at 50% 50%);
   }
   #peephole-ring-rect {
     position: fixed; z-index: 16; left: 50%; bottom: 440px;
@@ -85,7 +85,7 @@
   #peephole-ring-rect.show { display: block; }
   #peephole-ring-circle {
     position: fixed; z-index: 16; left: 50%; top: 50%;
-    width: 92vmin; height: 92vmin; margin: -46vmin 0 0 -46vmin;
+    width: 100vmin; height: 100vmin; margin: -50vmin 0 0 -50vmin;
     border-radius: 50%; pointer-events: none; display: none;
     border: 1.5px solid rgba(147,197,253,0.8);
     box-shadow: 0 0 10px rgba(59,130,246,0.4), inset 0 0 10px rgba(59,130,246,0.25);
@@ -722,14 +722,26 @@ function normalizeAngle180(deg) {
   return ((deg + 180) % 360 + 360) % 360 - 180;
 }
 
-// Locks whatever heading + tilt the phone is facing right now as yaw/pitch-0
-// (the pano's "front"). Called by the Calibrate button and the recalibrate
-// icon — re-callable anytime, not just once at page load. Also clears
-// manual trim, since a fresh calibration supersedes any nudging done
-// against the old baseline.
-function recalibrateHeading() {
-  if (state.currentHeading !== null) state.baseHeading = state.currentHeading;
-  if (state.currentBeta !== null) state.basePitch = state.currentBeta;
+// Locks a heading + tilt as yaw/pitch-0 (the pano's "front") — by default
+// whatever the phone is facing right now. Called by the Calibrate button
+// and the recalibrate icon — re-callable anytime, not just once at page
+// load. Also clears manual trim, since a fresh calibration supersedes any
+// nudging done against the old baseline.
+//
+// headingOverride/betaOverride let a caller lock in sensor readings from
+// an earlier moment instead of "right now" — auto-detect needs this: the
+// whiteboard quad is captured at lock time, but "right now" (when Keep is
+// actually tapped) is a beat later, after the presenter has read the
+// confirm prompt and reached down to tap a button near the bottom of the
+// screen — long enough for the phone's physical tilt to drift, which
+// silently re-defines pitch-0 as that drifted angle instead of the aim
+// the detection was actually based on. Reported as the reveal opening on
+// the floor/ceiling edge instead of the whiteboard's middle.
+function recalibrateHeading(headingOverride, betaOverride) {
+  const heading = headingOverride !== undefined ? headingOverride : state.currentHeading;
+  const beta = betaOverride !== undefined ? betaOverride : state.currentBeta;
+  if (heading !== null && heading !== undefined) state.baseHeading = heading;
+  if (beta !== null && beta !== undefined) state.basePitch = beta;
   state.yawTrim = 0;
   state.pitchTrim = 0;
   // yawFromSensor/pitchFromSensor would otherwise only recompute against
@@ -1127,8 +1139,8 @@ const AUTO_DETECT_TEXT = "Aim your phone at the center of the whiteboard.";
 // Applies whatever yaw/pitch trim was already computed (0,0 for the plain
 // manual tap) and runs the shared reveal: close the overlay, show the
 // category pills, fire the fanfare, then the look-hint once it clears.
-function commitCalibration(extraYawTrim, extraPitchTrim) {
-  recalibrateHeading(); // resets yawTrim/pitchTrim to 0, then we layer on any detected correction
+function commitCalibration(extraYawTrim, extraPitchTrim, headingOverride, betaOverride) {
+  recalibrateHeading(headingOverride, betaOverride); // resets yawTrim/pitchTrim to 0, then we layer on any detected correction
   state.yawTrim = extraYawTrim || 0;
   state.pitchTrim = extraPitchTrim || 0;
   state.revealed = true;
@@ -1359,11 +1371,16 @@ async function startAutoDetect() {
   // before it becomes the calibration, rather than it being sprung on
   // them a half-second later.
   function showLockedConfirm(cx, cy) {
+    // Snapshot the sensor reading now, at the moment the quad is frozen —
+    // not whenever Keep eventually gets tapped. See the comment on
+    // recalibrateHeading() for why that gap matters.
+    const lockedHeading = state.currentHeading;
+    const lockedBeta = state.currentBeta;
     calibrateCardText.textContent = "Found the whiteboard — does this look right?";
     calibrateBtn.style.display = "";
     calibrateBtn.disabled = false;
     calibrateBtn.textContent = "Keep";
-    calibrateBtn.onclick = () => finishAutoDetect(cx, cy);
+    calibrateBtn.onclick = () => finishAutoDetect(cx, cy, lockedHeading, lockedBeta);
     calibrateManualLink.style.display = "block";
     calibrateManualLink.textContent = "Retry";
     calibrateManualLink.onclick = () => {
@@ -1443,7 +1460,7 @@ async function startAutoDetect() {
   tick();
 }
 
-function finishAutoDetect(cxPercent, cyPercent) {
+function finishAutoDetect(cxPercent, cyPercent, lockedHeading, lockedBeta) {
   if (autoDetectHandle && autoDetectHandle.worker) autoDetectHandle.worker.terminate();
   autoDetectHandle = null;
   const cxPx = (cxPercent / 100) * window.innerWidth;
@@ -1455,7 +1472,7 @@ function finishAutoDetect(cxPercent, cyPercent) {
   const dy = window.innerHeight / 2 - cyPx;
   cornerBoxSvg.style.display = "none";
   cornerBoxPoly.classList.remove("locked");
-  commitCalibration(-dx * 0.0045, -dy * 0.0045);
+  commitCalibration(-dx * 0.0045, -dy * 0.0045, lockedHeading, lockedBeta);
 }
 
 document.getElementById("recalibrate-btn").addEventListener("click", () => {
