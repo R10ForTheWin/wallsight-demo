@@ -72,8 +72,8 @@
     clip-path: inset(calc(100% - 440px - 38vmin) calc((100vw - 78vmin) / 2) 440px calc((100vw - 78vmin) / 2) round 20px);
   }
   #three-canvas.peephole-circle {
-    -webkit-clip-path: circle(50vmin at 50% 50%);
-    clip-path: circle(50vmin at 50% 50%);
+    -webkit-clip-path: circle(60vmin at 50% 50%);
+    clip-path: circle(60vmin at 50% 50%);
   }
   #peephole-ring-rect {
     position: fixed; z-index: 16; left: 50%; bottom: 440px;
@@ -85,7 +85,7 @@
   #peephole-ring-rect.show { display: block; }
   #peephole-ring-circle {
     position: fixed; z-index: 16; left: 50%; top: 50%;
-    width: 100vmin; height: 100vmin; margin: -50vmin 0 0 -50vmin;
+    width: 120vmin; height: 120vmin; margin: -60vmin 0 0 -60vmin;
     border-radius: 50%; pointer-events: none; display: none;
     border: 1.5px solid rgba(147,197,253,0.8);
     box-shadow: 0 0 10px rgba(59,130,246,0.4), inset 0 0 10px rgba(59,130,246,0.25);
@@ -471,7 +471,7 @@
     <span>WALLSIGHT</span>
   </div>
   <h1>See What's Behind Your Walls</h1>
-  <button id="start-btn">Remove Wall</button>
+  <button id="start-btn">Remove Walls</button>
   <div id="start-error"></div>
 </div>
 
@@ -806,12 +806,12 @@ function setupDragFallback() {
 setupDragFallback();
 
 /* ---------------- Peephole reveal mode ---------------- */
-// Experimenting with full-screen ("no walls" everywhere, not just inside
-// a window) as the default post-calibration view — peepholeMode now only
+// Tried full-screen as the default post-calibration view; circle
+// peephole read better, so it's back as the default. peepholeMode only
 // governs the CIRCLE (post-commit) shape, not the rect aiming guide,
 // which always shows during calibration regardless of this toggle since
 // you need it to aim no matter which mode you'll land in afterward.
-let peepholeMode = false;
+let peepholeMode = true;
 // "rect" is the small aiming-guide shape used only while the calibration
 // overlay is open (clears #calibrate-card); "circle" is the large,
 // true-centered peephole used for the actual reveal once calibration has
@@ -1316,8 +1316,8 @@ async function startAutoDetect() {
   calibrateCardHeading.style.display = "none";
   calibrateCardText.textContent = AUTO_DETECT_TEXT;
   calibrateManualLink.style.display = "block";
-  calibrateManualLink.textContent = "Cancel";
-  calibrateManualLink.onclick = () => resetCalibrationUI();
+  calibrateManualLink.textContent = "Use manual calibration";
+  calibrateManualLink.onclick = () => switchToManual();
 
   const worker = new Worker("corner-detect-worker.js");
   const readyPromise = new Promise((resolve, reject) => {
@@ -1393,8 +1393,8 @@ async function startAutoDetect() {
       startedAt = performance.now();
       cornerBoxPoly.classList.remove("locked");
       calibrateBtn.style.display = "none";
-      calibrateManualLink.textContent = "Cancel";
-      calibrateManualLink.onclick = () => resetCalibrationUI();
+      calibrateManualLink.textContent = "Use manual calibration";
+      calibrateManualLink.onclick = () => switchToManual();
       calibrateCardText.textContent = "Looking for the whiteboard…";
       tick();
     };
@@ -1494,7 +1494,7 @@ resetCalibrationUI();
 // the motion listener, then returns to the start screen in a state
 // indistinguishable from a fresh page load — startBtn re-requests both
 // permissions and re-adds the listener from scratch, so nothing here can
-// be left half-torn-down for the next "Remove Wall" tap to trip over.
+// be left half-torn-down for the next "Remove Walls" tap to trip over.
 document.getElementById("exit-btn").addEventListener("click", () => {
   calibrationGeneration++;
   cancelInFlightAutoDetect();
@@ -1523,7 +1523,7 @@ document.getElementById("exit-btn").addEventListener("click", () => {
   setPeepholeShape("rect");
 
   startBtn.disabled = false;
-  startBtn.textContent = "Remove Wall";
+  startBtn.textContent = "Remove Walls";
   startError.textContent = "";
   startScreen.style.display = "";
 });
