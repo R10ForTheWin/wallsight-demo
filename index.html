@@ -557,11 +557,27 @@ const wallGroup = new THREE.Group();
 scene.add(wallGroup);
 
 /* ---------------- Pano asset loading (with placeholder fallback) ---------------- */
+// GitHub Pages/Fastly serves these with cache-control: max-age=600, and
+// they're fetched by plain filename — so reloading the HTML fresh (even
+// via a cache-busted ?v= link) does NOT guarantee a browser or the CDN
+// edge actually refetches an updated pano/category image; either can
+// keep serving old bytes for up to 10 minutes after a deploy, and a
+// browser's own HTTP cache can hold on longer than that. Confirmed on a
+// real device: a just-redeployed studs fix still showed the old broken
+// overlay because of exactly this. ASSET_VERSION is a plain cache-buster
+// appended to every texture URL — bump it any time pano.jpg or any
+// pano-<category>.png file changes, so the new bytes are guaranteed to
+// load under a fresh URL instead of an old cached one.
+const ASSET_VERSION = "2";
+function versioned(file) {
+  return file + "?v=" + ASSET_VERSION;
+}
+
 /* pano.jpg goes in the same folder as this file: a single real 360°
    equirectangular capture of the room (2:1 aspect). If it's missing, a
    labeled placeholder texture is generated instead so the rig still runs
    end-to-end while the photo is pending. */
-const PANO_FILE = "pano.jpg";
+const PANO_FILE = versioned("pano.jpg");
 
 // Category layers: additional equirect images, same 2:1 framing as
 // pano.jpg (same camera position/orientation), each showing just that
@@ -571,7 +587,12 @@ const PANO_FILE = "pano.jpg";
 // (mirrors how the old per-direction annots handled gaps).
 const CATEGORIES = ["studs", "electrical", "plumbing", "hvac"];
 const CATEGORY_STATE_KEY = { studs: "showStuds", electrical: "showElectrical", plumbing: "showPlumbing", hvac: "showHvac" };
-const CATEGORY_FILES = { studs: "pano-studs.png", electrical: "pano-electrical.png", plumbing: "pano-plumbing.png", hvac: "pano-hvac.png" };
+const CATEGORY_FILES = {
+  studs: versioned("pano-studs.png"),
+  electrical: versioned("pano-electrical.png"),
+  plumbing: versioned("pano-plumbing.png"),
+  hvac: versioned("pano-hvac.png"),
+};
 
 const loader = new THREE.TextureLoader();
 const missingAssets = [];
