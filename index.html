@@ -347,9 +347,12 @@
      tilting the phone up/down would do nothing, rolling it would move the
      reveal. Rather than handle both orientations, just block landscape
      outright; a media query means this covers every screen (start,
-     calibrate, revealed) automatically, with no JS state to keep in sync. */
+     calibrate, revealed) automatically, with no JS state to keep in sync.
+     Scoped to touch-primary devices (hover:none, pointer:coarse) so a
+     landscape-shaped laptop window — which can't be rotated — isn't
+     mistaken for a sideways phone and blocked forever. */
   #rotate-overlay { display: none; }
-  @media (orientation: landscape) {
+  @media (orientation: landscape) and (hover: none) and (pointer: coarse) {
     #rotate-overlay {
       display: flex; position: fixed; inset: 0; z-index: 100;
       flex-direction: column; align-items: center; justify-content: center;
